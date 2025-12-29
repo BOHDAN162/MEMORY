@@ -2,15 +2,25 @@ import ThemeToggle from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { navigationItems } from "@/lib/config/navigation";
 import { cn } from "@/lib/utils/cn";
+import TourOverlay from "@/components/features/tour/tour-overlay";
 import { Sidebar } from "./sidebar";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+const tourTargetMap: Record<string, string | undefined> = {
+  "/map": "nav-map",
+  "/content": "nav-content",
+  "/memoryverse": "nav-memoryverse",
+  "/community": "nav-community",
+  "/profile": "nav-profile",
+  "/settings": "nav-settings",
+};
+
 export const AppShell = ({ children }: { children: ReactNode }) => {
   return (
-    <div className="flex min-h-screen bg-background text-foreground transition-colors duration-300">
+    <div className="relative flex min-h-screen bg-background text-foreground transition-colors duration-300">
       <Sidebar />
-      <div className="flex flex-1 flex-col">
+      <div className="relative flex flex-1 flex-col">
         <header className="flex flex-col gap-4 border-b border-border bg-card/80 px-4 py-4 backdrop-blur-lg shadow-[0_12px_40px_-24px_rgba(0,0,0,0.45)] transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-primary">
@@ -30,6 +40,7 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
                 <Link
                   key={item.href}
                   href={item.href}
+                  data-tour={tourTargetMap[item.href]}
                   className={cn(
                     buttonVariants({ variant: "soft", size: "sm" }),
                     "shadow-sm hover:shadow-md hover:shadow-primary/20",
@@ -46,6 +57,7 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
             {children}
           </div>
         </main>
+        <TourOverlay />
       </div>
     </div>
   );

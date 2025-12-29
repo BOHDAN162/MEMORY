@@ -6,6 +6,15 @@ import { Logo } from "@/components/layout/logo";
 import { navigationItems } from "@/lib/config/navigation";
 import { cn } from "@/lib/utils/cn";
 
+const tourTargetMap: Record<string, string | undefined> = {
+  "/map": "nav-map",
+  "/content": "nav-content",
+  "/memoryverse": "nav-memoryverse",
+  "/community": "nav-community",
+  "/profile": "nav-profile",
+  "/settings": "nav-settings",
+};
+
 export const Sidebar = () => {
   const pathname = usePathname();
 
@@ -17,11 +26,13 @@ export const Sidebar = () => {
           {navigationItems.map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const dataTour = tourTargetMap[item.href];
 
             return (
               <Link
                 key={item.href}
                 href={item.href}
+                data-tour={dataTour}
                 className={cn(
                   "group rounded-xl px-4 py-3 transition-all",
                   isActive

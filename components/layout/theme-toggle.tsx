@@ -21,6 +21,7 @@ const ThemeToggle = () => {
       variant="ghost"
       size="sm"
       aria-label="Toggle theme"
+      data-tour="theme-toggle"
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       <span className="text-lg" aria-hidden>
