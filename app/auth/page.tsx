@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Logo } from "@/components/common/logo";
+import { Logo } from "@/components/layout/logo";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 
