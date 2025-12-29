@@ -10,8 +10,8 @@ export const Sidebar = () => {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-72 border-r border-slate-200 bg-white/70 backdrop-blur-xl transition-colors duration-300 dark:border-white/10 dark:bg-slate-900/50 sm:flex">
-      <div className="flex h-full w-full flex-col gap-8 px-4 py-6">
+    <aside className="hidden w-72 border-r border-border bg-card/80 backdrop-blur-xl transition-colors duration-300 sm:flex">
+      <div className="flex h-full w-full flex-col gap-8 px-5 py-6">
         <Logo />
         <nav className="flex flex-1 flex-col gap-2">
           {navigationItems.map((item) => {
@@ -23,23 +23,23 @@ export const Sidebar = () => {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "group rounded-xl px-4 py-3 transition-colors",
+                  "group rounded-xl px-4 py-3 transition-all",
                   isActive
-                    ? "bg-indigo-50 text-slate-900 shadow-inner shadow-indigo-500/10 dark:bg-white/10 dark:text-white"
-                    : "text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white",
+                    ? "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/40 shadow-[0_0_0_1px_color-mix(in_srgb,hsl(var(--primary))_20%,transparent)]"
+                    : "text-muted-foreground hover:-translate-y-[1px] hover:bg-muted/60 hover:text-foreground",
                 )}
               >
                 <p className="text-sm font-semibold">{item.title}</p>
-                <p className="text-xs text-slate-500 transition-colors group-hover:text-slate-700 dark:text-slate-400 dark:group-hover:text-slate-200">
+                <p className="text-xs text-muted-foreground transition-colors group-hover:text-foreground">
                   {item.hint}
                 </p>
               </Link>
             );
           })}
         </nav>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700 shadow-inner shadow-indigo-500/10 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
-          <p className="font-semibold text-slate-900 dark:text-white">MVP map</p>
-          <p className="mt-1 text-slate-600 dark:text-slate-300">
+        <div className="rounded-xl border border-border bg-muted/60 px-4 py-3 text-xs text-muted-foreground shadow-inner shadow-primary/10">
+          <p className="font-semibold text-foreground">MVP map</p>
+          <p className="mt-1 text-muted-foreground">
             Навигация уже работает. Функции появятся по шагам следующими
             промптами.
           </p>
