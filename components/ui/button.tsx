@@ -15,15 +15,15 @@ export const buttonVariants = ({
   className?: string;
 }) => {
   const baseStyles =
-    "inline-flex items-center justify-center rounded-xl font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60 disabled:cursor-not-allowed";
+    "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60";
 
   const variantStyles: Record<ButtonVariant, string> = {
     primary:
-      "bg-indigo-500 text-white hover:bg-indigo-400 focus-visible:outline-indigo-300 dark:bg-indigo-500 dark:hover:bg-indigo-400",
+      "bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/20 hover:bg-primary/90 active:translate-y-[1px]",
     ghost:
-      "bg-transparent text-slate-800 hover:bg-slate-200 focus-visible:outline-indigo-300 dark:text-slate-100 dark:hover:bg-white/10",
+      "bg-transparent text-foreground hover:bg-accent/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
     soft:
-      "bg-slate-100 text-slate-900 hover:bg-slate-200 focus-visible:outline-indigo-300 dark:bg-white/5 dark:text-white dark:hover:bg-white/15",
+      "bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:text-secondary-foreground shadow-inner shadow-black/5",
   };
 
   const sizeStyles: Record<ButtonSize, string> = {

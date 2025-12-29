@@ -8,9 +8,11 @@ const ThemeToggle = () => {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  // The mounted flag prevents hydration mismatches when next-themes switches classes.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    // Mark as mounted to prevent hydration mismatch while allowing theme class application.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   const isDark = (resolvedTheme ?? "dark") === "dark";
 
@@ -21,7 +23,12 @@ const ThemeToggle = () => {
       aria-label="Toggle theme"
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
-      {mounted ? (isDark ? "Switch to light" : "Switch to dark") : "Toggle theme"}
+      <span className="text-lg" aria-hidden>
+        {mounted ? (isDark ? "🌞" : "🌙") : "⏳"}
+      </span>
+      <span className="sr-only">
+        {mounted ? (isDark ? "Switch to light mode" : "Switch to dark mode") : "Toggle theme"}
+      </span>
     </Button>
   );
 };
