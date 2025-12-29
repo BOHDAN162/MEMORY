@@ -1,4 +1,4 @@
-import ThemeToggle from "@/components/common/theme-toggle";
+import ThemeToggle from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { navigationItems } from "@/lib/config/navigation";
 import { cn } from "@/lib/utils/cn";

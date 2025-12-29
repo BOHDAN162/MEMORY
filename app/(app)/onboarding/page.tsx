@@ -1,4 +1,4 @@
-import { PlaceholderCard } from "@/components/common/placeholder-card";
+import { PlaceholderCard } from "@/components/features/placeholder-card";
 
 const OnboardingPage = () => {
   return (

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Logo } from "@/components/common/logo";
+import { Logo } from "@/components/layout/logo";
 import { navigationItems } from "@/lib/config/navigation";
 import { cn } from "@/lib/utils/cn";
 

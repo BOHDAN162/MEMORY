@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import ThemeProvider from "@/components/common/theme-provider";
+import ThemeProvider from "@/components/layout/theme-provider";
 import { siteConfig } from "@/lib/config/site";
 import "./globals.css";
 
