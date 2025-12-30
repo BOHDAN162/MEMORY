@@ -1,8 +1,9 @@
 import { InterestSelector } from "@/components/features/interests/interest-selector";
-import { getDevUserId } from "@/lib/config/env";
-import { getInterests, getUserInterests, setUserInterests } from "@/lib/server/interests";
+import { getInterests, getUserInterests, setCurrentUserInterests } from "@/lib/server/interests";
 import type { Interest } from "@/lib/types/interests";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 type ServerActionResult = {
@@ -10,16 +11,17 @@ type ServerActionResult = {
   message?: string;
 };
 
-const fetchData = async (): Promise<{
+const fetchData = async (
+  userId: string,
+): Promise<{
   interests: Interest[];
   interestsError: string | null;
   userInterests: string[];
   userInterestsError: string | null;
 }> => {
-  const devUserId = getDevUserId();
   const [{ data: interests, error: interestsError }, userInterestsResponse] = await Promise.all([
     getInterests(),
-    devUserId ? getUserInterests(devUserId) : Promise.resolve({ data: [], error: null }),
+    getUserInterests(userId),
   ]);
 
   return {
@@ -33,20 +35,11 @@ const fetchData = async (): Promise<{
 const saveUserInterests = async (formData: FormData): Promise<ServerActionResult> => {
   "use server";
 
-  const devUserId = getDevUserId();
-
-  if (!devUserId) {
-    return {
-      error:
-        "Переменная NEXT_PUBLIC_DEV_USER_ID не задана. Добавьте её в .env или .env.local для dev.",
-    };
-  }
-
   const interestIds = formData.getAll("interestIds").map(String);
-  const result = await setUserInterests(devUserId, interestIds);
+  const result = await setCurrentUserInterests(interestIds);
 
   if (result.error) {
-    return { error: result.error };
+    return { error: result.error === "Not authenticated" ? "Нужно войти" : result.error };
   }
 
   revalidatePath("/onboarding");
@@ -71,8 +64,27 @@ const LoadingState = () => (
 );
 
 const OnboardingContent = async () => {
-  const devUserId = getDevUserId();
-  const { interests, interestsError, userInterests, userInterestsError } = await fetchData();
+  const supabase = await createSupabaseServerClient();
+
+  if (!supabase) {
+    return (
+      <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+        <p className="text-sm text-destructive">
+          Supabase client is not configured. Проверьте переменные окружения.
+        </p>
+      </section>
+    );
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+
+  if (userError || !userData?.user) {
+    redirect("/auth");
+  }
+
+  const { interests, interestsError, userInterests, userInterestsError } = await fetchData(
+    userData.user.id,
+  );
 
   return (
     <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
@@ -81,18 +93,9 @@ const OnboardingContent = async () => {
           <p className="text-xs uppercase tracking-[0.25em] text-primary">Onboarding</p>
           <h2 className="text-2xl font-semibold">Выбор интересов</h2>
           <p className="text-sm text-muted-foreground">
-            Выберите интересы и сохраните их. Пока используется DEV User ID из окружения.
+            Выберите интересы и сохраните их. Данные сохраняются для текущего пользователя.
           </p>
         </div>
-        {devUserId ? (
-          <span className="text-xs text-muted-foreground">
-            DEV_USER_ID: <span className="font-semibold">{devUserId}</span>
-          </span>
-        ) : (
-          <span className="text-xs text-destructive">
-            Установите NEXT_PUBLIC_DEV_USER_ID в .env, чтобы тестировать сохранение.
-          </span>
-        )}
       </div>
 
       {interestsError ? (
@@ -112,8 +115,6 @@ const OnboardingContent = async () => {
           interests={interests}
           initialSelected={userInterests}
           onSubmit={saveUserInterests}
-          devUserIdHint="NEXT_PUBLIC_DEV_USER_ID не найден. Добавьте переменную в .env.local для дев-окружения."
-          isUserReady={Boolean(devUserId)}
         />
       ) : (
         <p className="text-sm text-muted-foreground">

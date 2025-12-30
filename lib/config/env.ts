@@ -13,6 +13,3 @@ export const getSupabaseCredentials = (): SupabaseCredentials | null => {
 
   return { url, anonKey };
 };
-
-export const getDevUserId = (): string | null =>
-  process.env.NEXT_PUBLIC_DEV_USER_ID ?? null;
