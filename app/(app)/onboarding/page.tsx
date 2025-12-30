@@ -3,6 +3,7 @@ import { getDevUserId } from "@/lib/config/env";
 import { getInterests, getUserInterests, setUserInterests } from "@/lib/server/interests";
 import type { Interest } from "@/lib/types/interests";
 import { revalidatePath } from "next/cache";
+import { Suspense } from "react";
 
 type ServerActionResult = {
   error: string | null;
@@ -55,7 +56,21 @@ const saveUserInterests = async (formData: FormData): Promise<ServerActionResult
   return { error: null, message: "Сохранено" };
 };
 
-const OnboardingPage = async () => {
+const LoadingState = () => (
+  <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+    <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-2">
+        <p className="text-xs uppercase tracking-[0.25em] text-primary">Onboarding</p>
+        <div className="h-6 w-48 animate-pulse rounded bg-muted/60" />
+        <div className="h-4 w-64 animate-pulse rounded bg-muted/60" />
+      </div>
+      <div className="h-4 w-40 animate-pulse rounded bg-muted/60" />
+    </div>
+    <p className="text-sm text-muted-foreground">Загрузка интересов...</p>
+  </section>
+);
+
+const OnboardingContent = async () => {
   const devUserId = getDevUserId();
   const { interests, interestsError, userInterests, userInterestsError } = await fetchData();
 
@@ -106,6 +121,14 @@ const OnboardingPage = async () => {
         </p>
       )}
     </section>
+  );
+};
+
+const OnboardingPage = () => {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <OnboardingContent />
+    </Suspense>
   );
 };
 
