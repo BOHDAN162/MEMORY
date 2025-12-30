@@ -3,6 +3,7 @@ export type Interest = {
   slug: string;
   title: string;
   cluster: string | null;
+  synonyms: string[];
 };
 
 export type ServiceResponse<T> = {

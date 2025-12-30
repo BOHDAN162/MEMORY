@@ -15,14 +15,22 @@ export const getInterests = async (): Promise<ServiceResponse<Interest[]>> => {
 
   const { data, error } = await supabase
     .from("interests")
-    .select("id, slug, title, cluster")
+    .select("id, slug, title, cluster, synonyms")
+    .order("cluster", { ascending: true })
     .order("title", { ascending: true });
 
   if (error) {
     return { data: null, error: error.message };
   }
 
-  return { data: data ?? [], error: null };
+  return {
+    data:
+      data?.map((interest) => ({
+        ...interest,
+        synonyms: interest.synonyms ?? [],
+      })) ?? [],
+    error: null,
+  };
 };
 
 export const getUserInterests = async (
