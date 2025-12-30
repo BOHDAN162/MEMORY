@@ -2,6 +2,69 @@ import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Interest, ServiceResponse } from "@/lib/types/interests";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const normalizeInterestIds = (interestIds: string[]) =>
+  Array.from(new Set(interestIds.filter(Boolean)));
+
+export const getUserIdByAuthUserId = async (
+  supabase: SupabaseClient,
+  authUserId: string,
+): Promise<ServiceResponse<string>> => {
+  if (!authUserId) {
+    return { data: null, error: "Auth user ID is required." };
+  }
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  if (!data) {
+    return { data: null, error: "User profile not found." };
+  }
+
+  return { data: data.id, error: null };
+};
+
+export const replaceUserInterests = async (
+  supabase: SupabaseClient,
+  userId: string,
+  interestIds: string[],
+): Promise<ServiceResponse<null>> => {
+  const sanitizedInterestIds = normalizeInterestIds(interestIds);
+
+  const { error: deleteError } = await supabase
+    .from("user_interests")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteError) {
+    return { data: null, error: deleteError.message };
+  }
+
+  if (sanitizedInterestIds.length === 0) {
+    return { data: null, error: null };
+  }
+
+  const rows = sanitizedInterestIds.map((interestId) => ({
+    user_id: userId,
+    interest_id: interestId,
+  }));
+
+  const { error: insertError } = await supabase.from("user_interests").insert(rows);
+
+  if (insertError) {
+    return { data: null, error: insertError.message };
+  }
+
+  return { data: null, error: null };
+};
 
 export const getInterests = async (): Promise<ServiceResponse<Interest[]>> => {
   const supabase = await createSupabaseServerClient();
@@ -49,10 +112,19 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
     return { data: [], error: "Not authenticated" };
   }
 
+  const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
+    supabase,
+    userData.user.id,
+  );
+
+  if (userIdError || !userId) {
+    return { data: null, error: userIdError ?? "User profile not found." };
+  }
+
   const { data, error } = await supabase
     .from("user_interests")
     .select("interest:interests(id, slug, title, cluster, synonyms)")
-    .eq("user_id", userData.user.id);
+    .eq("user_id", userId);
 
   if (error) {
     return { data: null, error: error.message };
@@ -90,9 +162,9 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
 };
 
 export const getUserInterests = async (
-  userId: string,
+  authUserId: string,
 ): Promise<ServiceResponse<string[]>> => {
-  if (!userId) {
+  if (!authUserId) {
     return { data: null, error: "User ID is required to fetch interests." };
   }
 
@@ -103,6 +175,15 @@ export const getUserInterests = async (
       data: null,
       error: "Supabase client is not configured. Check environment variables.",
     };
+  }
+
+  const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
+    supabase,
+    authUserId,
+  );
+
+  if (userIdError || !userId) {
+    return { data: null, error: userIdError ?? "User profile not found." };
   }
 
   const { data, error } = await supabase
@@ -134,33 +215,7 @@ export const setUserInterests = async (
     };
   }
 
-  const { error: deleteError } = await supabase
-    .from("user_interests")
-    .delete()
-    .eq("user_id", userId);
-
-  if (deleteError) {
-    return { data: null, error: deleteError.message };
-  }
-
-  if (interestIds.length === 0) {
-    return { data: null, error: null };
-  }
-
-  const rows = interestIds.map((interestId) => ({
-    user_id: userId,
-    interest_id: interestId,
-  }));
-
-  const { error: insertError } = await supabase
-    .from("user_interests")
-    .insert(rows);
-
-  if (insertError) {
-    return { data: null, error: insertError.message };
-  }
-
-  return { data: null, error: null };
+  return replaceUserInterests(supabase, userId, interestIds);
 };
 
 export const setCurrentUserInterests = async (
@@ -181,31 +236,14 @@ export const setCurrentUserInterests = async (
     return { data: null, error: "Not authenticated" };
   }
 
-  const userId = userData.user.id;
+  const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
+    supabase,
+    userData.user.id,
+  );
 
-  const { error: deleteError } = await supabase
-    .from("user_interests")
-    .delete()
-    .eq("user_id", userId);
-
-  if (deleteError) {
-    return { data: null, error: deleteError.message };
+  if (userIdError || !userId) {
+    return { data: null, error: userIdError ?? "User profile not found." };
   }
 
-  if (interestIds.length === 0) {
-    return { data: null, error: null };
-  }
-
-  const rows = interestIds.map((interestId) => ({
-    user_id: userId,
-    interest_id: interestId,
-  }));
-
-  const { error: insertError } = await supabase.from("user_interests").insert(rows);
-
-  if (insertError) {
-    return { data: null, error: insertError.message };
-  }
-
-  return { data: null, error: null };
+  return replaceUserInterests(supabase, userId, interestIds);
 };

@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { saveUserInterests } from "@/app/actions/save-user-interests";
 import { Button } from "@/components/ui/button";
 import type { Interest } from "@/lib/types/interests";
 
 type InterestSelectorProps = {
   interests: Interest[];
   initialSelected: string[];
-  onSubmit: (formData: FormData) => Promise<{ error: string | null; message?: string }>;
 };
 
 type StatusMessage = {
@@ -18,7 +18,6 @@ type StatusMessage = {
 export const InterestSelector = ({
   interests,
   initialSelected,
-  onSubmit,
 }: InterestSelectorProps) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initialSelected),
@@ -48,13 +47,21 @@ export const InterestSelector = ({
     setStatus(null);
 
     startTransition(async () => {
-      const result = await onSubmit(formData);
+      try {
+        const result = await saveUserInterests(formData);
 
-      setStatus(
-        result.error
-          ? { type: "error", message: result.error }
-          : { type: "success", message: result.message ?? "Сохранено" },
-      );
+        setStatus(
+          result.error
+            ? { type: "error", message: result.error }
+            : { type: "success", message: result.message ?? "Сохранено" },
+        );
+      } catch (error) {
+        console.error("Failed to save interests", error);
+        setStatus({
+          type: "error",
+          message: "Не удалось сохранить интересы. Попробуйте ещё раз.",
+        });
+      }
     });
   };
 
