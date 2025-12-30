@@ -1,18 +1,12 @@
 import { InterestSelector } from "@/components/features/interests/interest-selector";
-import { getInterests, getUserInterests, setCurrentUserInterests } from "@/lib/server/interests";
+import { getInterests, getUserInterests } from "@/lib/server/interests";
 import type { Interest } from "@/lib/types/interests";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-type ServerActionResult = {
-  error: string | null;
-  message?: string;
-};
-
 const fetchData = async (
-  userId: string,
+  authUserId: string,
 ): Promise<{
   interests: Interest[];
   interestsError: string | null;
@@ -21,7 +15,7 @@ const fetchData = async (
 }> => {
   const [{ data: interests, error: interestsError }, userInterestsResponse] = await Promise.all([
     getInterests(),
-    getUserInterests(userId),
+    getUserInterests(authUserId),
   ]);
 
   return {
@@ -30,23 +24,6 @@ const fetchData = async (
     userInterests: userInterestsResponse.data ?? [],
     userInterestsError: userInterestsResponse.error,
   };
-};
-
-const saveUserInterests = async (formData: FormData): Promise<ServerActionResult> => {
-  "use server";
-
-  const interestIds = formData.getAll("interestIds").map(String);
-  const result = await setCurrentUserInterests(interestIds);
-
-  if (result.error) {
-    return { error: result.error === "Not authenticated" ? "Нужно войти" : result.error };
-  }
-
-  revalidatePath("/onboarding");
-  revalidatePath("/map");
-  revalidatePath("/content");
-
-  return { error: null, message: "Сохранено" };
 };
 
 const LoadingState = () => (
@@ -114,7 +91,6 @@ const OnboardingContent = async () => {
         <InterestSelector
           interests={interests}
           initialSelected={userInterests}
-          onSubmit={saveUserInterests}
         />
       ) : (
         <p className="text-sm text-muted-foreground">
