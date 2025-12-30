@@ -1,22 +1,12 @@
 import "server-only";
 
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient, Session } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-
-const getSupabaseEnv = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) {
-    return null;
-  }
-
-  return { url, key };
-};
+import { getSupabaseCredentials } from "@/lib/config/env";
 
 export const createSupabaseServerClient = async (): Promise<SupabaseClient | null> => {
-  const credentials = getSupabaseEnv();
+  const credentials = getSupabaseCredentials();
 
   if (!credentials) {
     return null;
@@ -24,12 +14,23 @@ export const createSupabaseServerClient = async (): Promise<SupabaseClient | nul
 
   const cookieStore = await cookies();
 
-  return createServerClient(credentials.url, credentials.key, {
+  return createServerClient(credentials.url, credentials.anonKey, {
     cookies: {
       get: (name: string) => cookieStore.get(name)?.value,
-      // Cookie mutations are not needed for a read-only session check during bootstrap.
-      set: () => {},
-      remove: () => {},
+      set: (name: string, value: string, options: CookieOptions) => {
+        try {
+          cookieStore.set({ name, value, ...options });
+        } catch {
+          // noop - cookies() is readonly in server components.
+        }
+      },
+      remove: (name: string, options: CookieOptions) => {
+        try {
+          cookieStore.set({ name, value: "", ...options });
+        } catch {
+          // noop - cookies() is readonly in server components.
+        }
+      },
     },
   });
 };
