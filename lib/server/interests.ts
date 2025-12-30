@@ -17,8 +17,8 @@ export const getUserIdByAuthUserId = async (
 
   const { data, error } = await supabase
     .from("users")
+    .upsert({ auth_user_id: authUserId }, { onConflict: "auth_user_id" })
     .select("id")
-    .eq("auth_user_id", authUserId)
     .maybeSingle();
 
   if (error) {
@@ -26,7 +26,7 @@ export const getUserIdByAuthUserId = async (
   }
 
   if (!data) {
-    return { data: null, error: "User profile not found." };
+    return { data: null, error: "Unable to ensure user profile." };
   }
 
   return { data: data.id, error: null };
@@ -118,7 +118,7 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
   );
 
   if (userIdError || !userId) {
-    return { data: null, error: userIdError ?? "User profile not found." };
+    return { data: null, error: userIdError ?? "Unable to ensure user profile." };
   }
 
   const { data, error } = await supabase
@@ -183,7 +183,7 @@ export const getUserInterests = async (
   );
 
   if (userIdError || !userId) {
-    return { data: null, error: userIdError ?? "User profile not found." };
+    return { data: null, error: userIdError ?? "Unable to ensure user profile." };
   }
 
   const { data, error } = await supabase
@@ -242,7 +242,7 @@ export const setCurrentUserInterests = async (
   );
 
   if (userIdError || !userId) {
-    return { data: null, error: userIdError ?? "User profile not found." };
+    return { data: null, error: userIdError ?? "Unable to ensure user profile." };
   }
 
   return replaceUserInterests(supabase, userId, interestIds);

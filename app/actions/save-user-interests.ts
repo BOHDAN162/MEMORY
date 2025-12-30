@@ -29,7 +29,7 @@ export const saveUserInterests = async (formData: FormData): Promise<SaveUserInt
   );
 
   if (userIdError || !userId) {
-    return { error: userIdError ?? "User profile not found." };
+    return { error: userIdError ?? "Unable to ensure user profile." };
   }
 
   const { error } = await replaceUserInterests(supabase, userId, interestIds);
