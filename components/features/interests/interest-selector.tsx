@@ -8,8 +8,6 @@ type InterestSelectorProps = {
   interests: Interest[];
   initialSelected: string[];
   onSubmit: (formData: FormData) => Promise<{ error: string | null; message?: string }>;
-  devUserIdHint?: string;
-  isUserReady: boolean;
 };
 
 type StatusMessage = {
@@ -21,8 +19,6 @@ export const InterestSelector = ({
   interests,
   initialSelected,
   onSubmit,
-  devUserIdHint,
-  isUserReady,
 }: InterestSelectorProps) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initialSelected),
@@ -50,16 +46,6 @@ export const InterestSelector = ({
 
   const handleSubmit = async (formData: FormData) => {
     setStatus(null);
-
-    if (!isUserReady) {
-      setStatus({
-        type: "error",
-        message:
-          devUserIdHint ??
-          "Установите переменную NEXT_PUBLIC_DEV_USER_ID, чтобы сохранять интересы в dev.",
-      });
-      return;
-    }
 
     startTransition(async () => {
       const result = await onSubmit(formData);
@@ -123,7 +109,7 @@ export const InterestSelector = ({
             <span>Выберите один или несколько интересов и сохраните.</span>
           )}
         </div>
-        <Button type="submit" disabled={isPending || !isUserReady}>
+        <Button type="submit" disabled={isPending}>
           {isPending ? "Сохраняем..." : "Сохранить выбранные интересы"}
         </Button>
       </div>

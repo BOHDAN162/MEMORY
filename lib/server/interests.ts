@@ -46,12 +46,12 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
   const { data: userData, error: userErr } = await supabase.auth.getUser();
 
   if (userErr || !userData?.user) {
-    return { data: [], error: null };
+    return { data: [], error: "Not authenticated" };
   }
 
   const { data, error } = await supabase
     .from("user_interests")
-    .select("interest_id, interests ( id, slug, title, cluster, synonyms )")
+    .select("interest:interests(id, slug, title, cluster, synonyms)")
     .eq("user_id", userData.user.id);
 
   if (error) {
@@ -61,9 +61,8 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
   const interests: Interest[] =
     data
       ?.map((row) => {
-        const joined = (row as { interests?: Interest | Interest[] | null }).interests;
-        const interest = (Array.isArray(joined) ? joined[0] : joined) as Interest | null;
-
+        const interestData = (row as { interest?: Interest | Interest[] | null }).interest;
+        const interest = Array.isArray(interestData) ? interestData[0] : interestData;
         if (!interest) return null;
 
         return {
@@ -156,6 +155,53 @@ export const setUserInterests = async (
   const { error: insertError } = await supabase
     .from("user_interests")
     .insert(rows);
+
+  if (insertError) {
+    return { data: null, error: insertError.message };
+  }
+
+  return { data: null, error: null };
+};
+
+export const setCurrentUserInterests = async (
+  interestIds: string[],
+): Promise<ServiceResponse<null>> => {
+  const supabase = await createSupabaseServerClient();
+
+  if (!supabase) {
+    return {
+      data: null,
+      error: "Supabase client is not configured. Check environment variables.",
+    };
+  }
+
+  const { data: userData, error: userErr } = await supabase.auth.getUser();
+
+  if (userErr || !userData?.user) {
+    return { data: null, error: "Not authenticated" };
+  }
+
+  const userId = userData.user.id;
+
+  const { error: deleteError } = await supabase
+    .from("user_interests")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteError) {
+    return { data: null, error: deleteError.message };
+  }
+
+  if (interestIds.length === 0) {
+    return { data: null, error: null };
+  }
+
+  const rows = interestIds.map((interestId) => ({
+    user_id: userId,
+    interest_id: interestId,
+  }));
+
+  const { error: insertError } = await supabase.from("user_interests").insert(rows);
 
   if (insertError) {
     return { data: null, error: insertError.message };

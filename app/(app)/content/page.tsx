@@ -1,7 +1,13 @@
 import { getCurrentUserInterests } from "@/lib/server/interests";
+import { redirect } from "next/navigation";
 
 const ContentPage = async () => {
   const { data, error } = await getCurrentUserInterests();
+
+  if (error === "Not authenticated") {
+    redirect("/auth");
+  }
+
   const interests = data ?? [];
 
   const grouped = interests.reduce<Record<string, typeof interests>>(
