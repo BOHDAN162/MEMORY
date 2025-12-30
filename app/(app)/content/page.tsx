@@ -1,7 +1,16 @@
-import { getInterests } from "@/lib/server/interests";
+import { getUserInterestsBySession } from "@/lib/server/interests";
+import type { Interest } from "@/lib/types/interests";
 
 const ContentPage = async () => {
-  const { data: interests, error } = await getInterests();
+  const { data: interests, error } = await getUserInterestsBySession();
+  const groupedInterests =
+    interests?.reduce<Record<string, Interest[]>>((groups, interest) => {
+      const clusterName = interest.cluster ?? "Без кластера";
+      groups[clusterName] = groups[clusterName]
+        ? [...groups[clusterName], interest]
+        : [interest];
+      return groups;
+    }, {}) ?? {};
 
   return (
     <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
@@ -24,20 +33,29 @@ const ContentPage = async () => {
       ) : null}
 
       {!error ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {interests?.map((interest) => (
-            <article
-              key={interest.id}
-              className="rounded-xl border border-border bg-background/40 p-4 shadow-[0_12px_40px_-30px_rgba(0,0,0,0.45)]"
-            >
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                {interest.cluster ?? "Без кластера"}
-              </p>
-              <h3 className="text-lg font-semibold">{interest.title}</h3>
-              <p className="text-xs text-muted-foreground">Slug: {interest.slug}</p>
-            </article>
-          ))}
-        </div>
+        interests && interests.length > 0 ? (
+          <div className="space-y-4">
+            {Object.entries(groupedInterests).map(([cluster, items]) => (
+              <article
+                key={cluster}
+                className="rounded-xl border border-border bg-background/40 p-4 shadow-[0_12px_40px_-30px_rgba(0,0,0,0.45)]"
+              >
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  {cluster}
+                </p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {items.map((interest) => (
+                    <li key={interest.id} className="text-foreground">
+                      {interest.title}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Интересы не выбраны</p>
+        )
       ) : null}
     </section>
   );

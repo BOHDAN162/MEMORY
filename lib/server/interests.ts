@@ -3,6 +3,62 @@ import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Interest, ServiceResponse } from "@/lib/types/interests";
 
+export const getUserInterestsBySession = async (): Promise<ServiceResponse<Interest[]>> => {
+  const supabase = await createSupabaseServerClient();
+
+  if (!supabase) {
+    return {
+      data: null,
+      error: "Supabase client is not configured. Check environment variables.",
+    };
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) {
+    return { data: null, error: userError.message };
+  }
+
+  if (!user) {
+    return { data: null, error: "Пользователь не авторизован." };
+  }
+
+  const { data, error } = await supabase
+    .from("user_interests")
+    .select(
+      `
+        interests (
+          id,
+          slug,
+          title,
+          cluster,
+          synonyms
+        )
+      `,
+    )
+    .eq("user_id", user.id)
+    .order("cluster", { ascending: true, referencedTable: "interests" })
+    .order("title", { ascending: true, referencedTable: "interests" });
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  const interests =
+    data
+      ?.map((entry) => entry.interests)
+      .filter((interest): interest is Interest => Boolean(interest))
+      .map((interest) => ({
+        ...interest,
+        synonyms: interest.synonyms ?? [],
+      })) ?? [];
+
+  return { data: interests, error: null };
+};
+
 export const getInterests = async (): Promise<ServiceResponse<Interest[]>> => {
   const supabase = await createSupabaseServerClient();
 
