@@ -1,12 +1,9 @@
 import { getCurrentUserInterests } from "@/lib/server/interests";
-import { redirect } from "next/navigation";
+import { buttonVariants } from "@/components/ui/button";
+import Link from "next/link";
 
 const ContentPage = async () => {
   const { data, error } = await getCurrentUserInterests();
-
-  if (error === "Not authenticated") {
-    redirect("/auth");
-  }
 
   const interests = data ?? [];
 
@@ -18,6 +15,20 @@ const ContentPage = async () => {
     },
     {},
   );
+
+  if (error === "Not authenticated") {
+    return (
+      <section className="space-y-4">
+        <h1>Контент</h1>
+        <div className="rounded-2xl border border-dashed border-border bg-muted/50 p-6 text-muted-foreground shadow-inner shadow-black/5">
+          <p className="text-sm text-foreground">Вы не вошли. Перейдите на /auth.</p>
+          <Link className={buttonVariants({ variant: "primary", size: "sm" })} href="/auth">
+            Войти
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section>

@@ -1,4 +1,5 @@
 import ThemeToggle from "@/components/layout/theme-toggle";
+import { LogoutButton } from "@/components/auth/logout-button";
 import { buttonVariants } from "@/components/ui/button";
 import { navigationItems } from "@/lib/config/navigation";
 import { cn } from "@/lib/utils/cn";
@@ -16,7 +17,12 @@ const tourTargetMap: Record<string, string | undefined> = {
   "/settings": "nav-settings",
 };
 
-export const AppShell = ({ children }: { children: ReactNode }) => {
+type AppShellProps = {
+  children: ReactNode;
+  isAuthenticated?: boolean;
+};
+
+export const AppShell = ({ children, isAuthenticated = false }: AppShellProps) => {
   return (
     <div className="relative flex min-h-screen bg-background text-foreground transition-colors duration-300">
       <Sidebar />
@@ -34,7 +40,10 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:items-end">
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              {isAuthenticated ? <LogoutButton /> : null}
+            </div>
             <div className="flex flex-wrap gap-2 sm:hidden">
               {navigationItems.map((item) => (
                 <Link
