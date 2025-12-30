@@ -33,6 +33,64 @@ export const getInterests = async (): Promise<ServiceResponse<Interest[]>> => {
   };
 };
 
+export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interest[]>> => {
+  const supabase = await createSupabaseServerClient();
+
+  if (!supabase) {
+    return {
+      data: null,
+      error: "Supabase client is not configured. Check environment variables.",
+    };
+  }
+
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !authData?.user) {
+    return { data: null, error: "UNAUTHENTICATED" };
+  }
+
+  const { data, error } = await supabase
+    .from("user_interests")
+    .select("interest_id, interests:interests ( id, slug, title, cluster, synonyms )")
+    .eq("user_id", authData.user.id)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  const interests: Interest[] = [];
+
+  for (const row of Array.isArray(data) ? data : []) {
+    const rawInterests = (row as { interests?: unknown }).interests;
+    const interestEntry =
+      Array.isArray(rawInterests) && rawInterests.length > 0
+        ? rawInterests[0]
+        : rawInterests;
+
+    if (!interestEntry || typeof interestEntry !== "object") {
+      continue;
+    }
+
+    const interestObject = interestEntry as Record<string, unknown>;
+    const { id, slug, title } = interestObject;
+
+    if (typeof id !== "string" || typeof slug !== "string" || typeof title !== "string") {
+      continue;
+    }
+
+    interests.push({
+      id,
+      slug,
+      title,
+      cluster: typeof interestObject.cluster === "string" ? interestObject.cluster : null,
+      synonyms: Array.isArray(interestObject.synonyms) ? interestObject.synonyms : [],
+    });
+  }
+
+  return { data: interests, error: null };
+};
+
 export const getUserInterests = async (
   userId: string,
 ): Promise<ServiceResponse<string[]>> => {
