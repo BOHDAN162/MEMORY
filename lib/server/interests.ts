@@ -43,50 +43,49 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
     };
   }
 
-  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const { data: userData, error: userErr } = await supabase.auth.getUser();
 
-  if (authError || !authData?.user) {
-    return { data: null, error: "UNAUTHENTICATED" };
+  if (userErr || !userData?.user) {
+    return { data: [], error: null };
   }
 
   const { data, error } = await supabase
     .from("user_interests")
-    .select("interest_id, interests:interests ( id, slug, title, cluster, synonyms )")
-    .eq("user_id", authData.user.id)
-    .order("created_at", { ascending: true });
+    .select("interest_id, interests ( id, slug, title, cluster, synonyms )")
+    .eq("user_id", userData.user.id);
 
   if (error) {
     return { data: null, error: error.message };
   }
 
-  const interests: Interest[] = [];
+  const interests: Interest[] =
+    data
+      ?.map((row) => {
+        const joined = (row as { interests?: Interest | Interest[] | null }).interests;
+        const interest = (Array.isArray(joined) ? joined[0] : joined) as Interest | null;
 
-  for (const row of Array.isArray(data) ? data : []) {
-    const rawInterests = (row as { interests?: unknown }).interests;
-    const interestEntry =
-      Array.isArray(rawInterests) && rawInterests.length > 0
-        ? rawInterests[0]
-        : rawInterests;
+        if (!interest) return null;
 
-    if (!interestEntry || typeof interestEntry !== "object") {
-      continue;
+        return {
+          id: interest.id,
+          slug: interest.slug,
+          title: interest.title,
+          cluster: interest.cluster ?? null,
+          synonyms: Array.isArray(interest.synonyms) ? interest.synonyms : [],
+        } as Interest;
+      })
+      .filter((interest): interest is Interest => Boolean(interest)) ?? [];
+
+  interests.sort((a, b) => {
+    const clusterA = a.cluster ?? "";
+    const clusterB = b.cluster ?? "";
+
+    if (clusterA.localeCompare(clusterB) !== 0) {
+      return clusterA.localeCompare(clusterB);
     }
 
-    const interestObject = interestEntry as Record<string, unknown>;
-    const { id, slug, title } = interestObject;
-
-    if (typeof id !== "string" || typeof slug !== "string" || typeof title !== "string") {
-      continue;
-    }
-
-    interests.push({
-      id,
-      slug,
-      title,
-      cluster: typeof interestObject.cluster === "string" ? interestObject.cluster : null,
-      synonyms: Array.isArray(interestObject.synonyms) ? interestObject.synonyms : [],
-    });
-  }
+    return a.title.localeCompare(b.title);
+  });
 
   return { data: interests, error: null };
 };
