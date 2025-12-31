@@ -1,10 +1,20 @@
 import { InterestSelector } from "@/components/features/interests/interest-selector";
+import { PersonalityQuiz } from "@/components/features/onboarding/personality-quiz";
 import { getInterests, getUserInterests } from "@/lib/server/interests";
 import { getOrCreateUserProfile } from "@/lib/server/user-profile";
-import type { Interest } from "@/lib/types/interests";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Interest } from "@/lib/types/interests";
+import type { PersonalityAnswerFields } from "@/lib/types/personality";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+
+type PersonalityAnswerRow = {
+  q1: string | null;
+  q2: string | null;
+  q3: string | null;
+  q4: string | null;
+  q5: string | null;
+};
 
 const fetchData = async (): Promise<{
   interests: Interest[];
@@ -58,9 +68,12 @@ const OnboardingContent = async () => {
     redirect("/auth");
   }
 
-  const { error: profileError } = await getOrCreateUserProfile(supabase, userData.user);
+  const { data: profile, error: profileError } = await getOrCreateUserProfile(
+    supabase,
+    userData.user,
+  );
 
-  if (profileError) {
+  if (profileError || !profile) {
     return (
       <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
         <p className="text-sm text-destructive">Не удалось загрузить профиль пользователя: {profileError}</p>
@@ -68,43 +81,67 @@ const OnboardingContent = async () => {
     );
   }
 
-  const { interests, interestsError, userInterests, userInterestsError } = await fetchData();
+  const [{ data: rawPersonalityAnswers, error: personalityAnswersError }, onboardingData] =
+    await Promise.all([
+      supabase
+        .from("personality_answers")
+        .select("q1, q2, q3, q4, q5")
+        .eq("user_id", profile.id)
+        .maybeSingle<PersonalityAnswerRow>(),
+      fetchData(),
+    ]);
+
+  const personalityAnswers: PersonalityAnswerFields | null = rawPersonalityAnswers
+    ? {
+        q1: rawPersonalityAnswers.q1 ?? "",
+        q2: rawPersonalityAnswers.q2 ?? "",
+        q3: rawPersonalityAnswers.q3 ?? "",
+        q4: rawPersonalityAnswers.q4 ?? "",
+        q5: rawPersonalityAnswers.q5 ?? "",
+      }
+    : null;
+
+  const { interests, interestsError, userInterests, userInterestsError } = onboardingData;
 
   return (
-    <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
-      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-primary">Onboarding</p>
-          <h2 className="text-2xl font-semibold">Выбор интересов</h2>
-          <p className="text-sm text-muted-foreground">
-            Выберите интересы и сохраните их. Данные сохраняются для текущего пользователя.
-          </p>
+    <div className="flex flex-col gap-6">
+      <PersonalityQuiz initialAnswers={personalityAnswers} loadError={personalityAnswersError?.message} />
+
+      <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-primary">Onboarding</p>
+            <h2 className="text-2xl font-semibold">Выбор интересов</h2>
+            <p className="text-sm text-muted-foreground">
+              Выберите интересы и сохраните их. Данные сохраняются для текущего пользователя.
+            </p>
+          </div>
         </div>
-      </div>
 
-      {interestsError ? (
-        <p className="text-sm text-destructive">
-          Не удалось загрузить список интересов: {interestsError}
-        </p>
-      ) : null}
+        {interestsError ? (
+          <p className="text-sm text-destructive">
+            Не удалось загрузить список интересов: {interestsError}
+          </p>
+        ) : null}
 
-      {userInterestsError ? (
-        <p className="text-sm text-destructive">
-          Не удалось загрузить выбранные интересы: {userInterestsError}
-        </p>
-      ) : null}
+        {userInterestsError ? (
+          <p className="text-sm text-destructive">
+            Не удалось загрузить выбранные интересы: {userInterestsError}
+          </p>
+        ) : null}
 
-      {interests.length > 0 ? (
-        <InterestSelector
-          interests={interests}
-          initialSelected={userInterests}
-        />
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Список интересов пуст. Проверьте таблицу public.interests в Supabase.
-        </p>
-      )}
-    </section>
+        {interests.length > 0 ? (
+          <InterestSelector
+            interests={interests}
+            initialSelected={userInterests}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Список интересов пуст. Проверьте таблицу public.interests в Supabase.
+          </p>
+        )}
+      </section>
+    </div>
   );
 };
 
