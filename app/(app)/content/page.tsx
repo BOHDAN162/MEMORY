@@ -1,54 +1,47 @@
-import { getCurrentUserInterests } from "@/lib/server/interests";
-import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
+import { getContent } from "@/lib/server/content/service";
+import type { ContentProviderId } from "@/lib/server/content/types";
+import { getUserInterests } from "@/lib/server/interests";
+import { buttonVariants } from "@/components/ui/button";
 
 type ContentPageProps = {
   searchParams?: {
+    ids?: string | string[];
     interests?: string | string[];
     mode?: string | string[];
   };
 };
 
-const ContentPage = async ({ searchParams }: ContentPageProps) => {
-  const interestsParamRaw = searchParams?.interests;
-  const interestsParamValue = Array.isArray(interestsParamRaw)
-    ? interestsParamRaw[0]
-    : interestsParamRaw ?? "";
-  const modeParamRaw = searchParams?.mode;
-  const modeParam = Array.isArray(modeParamRaw) ? modeParamRaw[0] : modeParamRaw;
-  const interestsFromQuery = interestsParamValue
+const parseIds = (param?: string | string[]): string[] => {
+  if (!param) return [];
+  const value = Array.isArray(param) ? param[0] : param;
+  return value
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+};
 
-  const { data, error } = await getCurrentUserInterests();
+const ContentPage = async ({ searchParams }: ContentPageProps) => {
+  const modeParamRaw = searchParams?.mode;
+  const modeParam = Array.isArray(modeParamRaw) ? modeParamRaw[0] : modeParamRaw;
+  const selectionMode = modeParam === "selected" ? "selected" : "all";
+  const idsParam = parseIds(searchParams?.ids);
+  const interestsParam = parseIds(searchParams?.interests);
+  const idsFromQuery = idsParam.length > 0 ? idsParam : interestsParam;
 
-  const interests = data ?? [];
-  const allInterestIds = interests.map((interest) => interest.id);
-  const hasExplicitInterests = interestsFromQuery.length > 0;
-  const useAllInterests = !hasExplicitInterests && modeParam === "all";
-  const effectiveInterestIds = hasExplicitInterests ? interestsFromQuery : allInterestIds;
-  const selectionModeLabel = hasExplicitInterests
-    ? "Выбрано на карте"
-    : useAllInterests
-      ? "Все интересы по запросу"
-      : "Нет выделения, используем все ваши интересы";
-  const selectionSourceNote = hasExplicitInterests
-    ? "Параметр interests получен из карты интересов."
-    : useAllInterests
-      ? "Режим mode=all: используем весь список ваших интересов."
-      : "Интересы не выбраны на карте — используем все интересы по умолчанию.";
+  const providerIds: ContentProviderId[] = ["youtube"];
+  let interestIds: string[] = [];
+  let interestsError: string | null = null;
 
-  const grouped = interests.reduce<Record<string, typeof interests>>(
-    (acc, interest) => {
-      const key = interest.cluster?.trim() || "Без кластера";
-      acc[key] = acc[key] ? [...acc[key], interest] : [interest];
-      return acc;
-    },
-    {},
-  );
+  if (selectionMode === "selected") {
+    interestIds = idsFromQuery;
+  } else {
+    const { data, error } = await getUserInterests();
+    interestIds = data ?? [];
+    interestsError = error;
+  }
 
-  if (error === "Not authenticated") {
+  if (selectionMode === "all" && interestsError === "Not authenticated") {
     return (
       <section className="space-y-4">
         <h1>Контент</h1>
@@ -62,6 +55,22 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
     );
   }
 
+  const shouldFetchContent = interestIds.length > 0 && !interestsError;
+  const contentResult = shouldFetchContent
+    ? await getContent({
+        providerIds,
+        interestIds,
+        limit: 20,
+      })
+    : null;
+
+  const cards = contentResult?.items ?? [];
+  const debug = contentResult?.debug;
+  const selectionDescription =
+    selectionMode === "selected"
+      ? "Режим: только выбранные интересы из параметра ids."
+      : "Режим: все интересы пользователя.";
+
   return (
     <section className="space-y-4">
       <h1>Контент</h1>
@@ -69,49 +78,92 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
       <div className="rounded-2xl border border-border bg-card/80 p-4 shadow-sm shadow-black/5">
         <p className="text-[11px] uppercase tracking-[0.22em] text-primary">Параметры запроса</p>
         <div className="mt-2 space-y-2">
-          <p className="text-base font-semibold text-foreground">{selectionModeLabel}</p>
+          <p className="text-base font-semibold text-foreground">{selectionDescription}</p>
           <p className="text-sm text-muted-foreground">
-            Подбор контента по интересам:{" "}
-            {effectiveInterestIds.length > 0 ? effectiveInterestIds.join(", ") : "интересов нет"}
+            Интересы: {interestIds.length > 0 ? interestIds.join(", ") : "не заданы"}
           </p>
-          <p className="text-xs text-muted-foreground">{selectionSourceNote}</p>
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span className="rounded-full bg-muted px-2 py-1">
-              mode: {modeParam ? String(modeParam) : "—"}
-            </span>
-            {interestsParamValue ? (
+            <span className="rounded-full bg-muted px-2 py-1">mode: {selectionMode}</span>
+            {idsFromQuery.length > 0 ? (
               <span className="rounded-full bg-muted px-2 py-1">
-                interests: {interestsParamValue}
+                ids: {idsFromQuery.join(", ")}
               </span>
             ) : null}
           </div>
         </div>
       </div>
 
-      {error ? (
-        <p className="text-destructive">Не удалось загрузить интересы: {error}</p>
+      {interestsError ? (
+        <p className="text-destructive">Не удалось загрузить интересы: {interestsError}</p>
       ) : null}
 
-      {!error && interests.length === 0 ? (
-        <p className="text-muted-foreground">Интересы не выбраны</p>
+      {!interestsError && interestIds.length === 0 ? (
+        <p className="text-muted-foreground">
+          Нет интересов для запроса. Добавьте интересы или передайте ids через строку запроса.
+        </p>
       ) : null}
 
-      {!error && interests.length > 0 ? (
-        <div className="space-y-3">
-          {Object.entries(grouped).map(([cluster, items]) => (
-            <div
-              key={cluster}
-              className="rounded-xl border border-border bg-background/70 p-3 shadow-inner shadow-black/5"
+      {cards.length > 0 ? (
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {cards.map((item) => (
+            <li
+              key={`${item.provider}:${item.id}`}
+              className="flex flex-col gap-2 rounded-xl border border-border bg-background/80 p-4 shadow-inner shadow-black/5"
             >
-              <p className="text-sm font-semibold text-foreground">Cluster: {cluster}</p>
-              <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
-                {items.map((interest) => (
-                  <li key={interest.id}>• {interest.title}</li>
-                ))}
-              </ul>
-            </div>
+              <div className="flex items-center justify-between gap-2 text-xs uppercase text-muted-foreground">
+                <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-semibold tracking-wide text-primary">
+                  {item.provider}
+                </span>
+                <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-medium">
+                  {item.type}
+                </span>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+                {item.description ? (
+                  <p className="text-sm text-muted-foreground">{item.description}</p>
+                ) : null}
+                {item.why ? <p className="text-xs text-foreground/80">Почему: {item.why}</p> : null}
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="rounded-full bg-muted px-2 py-1">
+                    Интересы: {item.interestIds.join(", ") || "—"}
+                  </span>
+                  {item.score !== null && item.score !== undefined ? (
+                    <span className="rounded-full bg-muted px-2 py-1">Score: {item.score}</span>
+                  ) : null}
+                  {item.cachedAt ? (
+                    <span className="rounded-full bg-muted px-2 py-1">
+                      Cached: {new Date(item.cachedAt).toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
+                {item.url ? (
+                  <a
+                    className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
+                    href={item.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Открыть
+                  </a>
+                ) : null}
+              </div>
+            </li>
           ))}
-        </div>
+        </ul>
+      ) : (
+        <p className="text-muted-foreground">Контента пока нет — провайдеры вернули пустой список.</p>
+      )}
+
+      {debug ? (
+        <details className="rounded-xl border border-dashed border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.22em] text-primary">
+            Debug
+          </summary>
+          <pre className="mt-2 whitespace-pre-wrap text-[12px] leading-relaxed">
+            {JSON.stringify(debug, null, 2)}
+          </pre>
+        </details>
       ) : null}
     </section>
   );
