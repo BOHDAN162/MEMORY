@@ -1,13 +1,12 @@
 import { InterestSelector } from "@/components/features/interests/interest-selector";
 import { getInterests, getUserInterests } from "@/lib/server/interests";
+import { getOrCreateUserProfile } from "@/lib/server/user-profile";
 import type { Interest } from "@/lib/types/interests";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-const fetchData = async (
-  authUserId: string,
-): Promise<{
+const fetchData = async (): Promise<{
   interests: Interest[];
   interestsError: string | null;
   userInterests: string[];
@@ -15,7 +14,7 @@ const fetchData = async (
 }> => {
   const [{ data: interests, error: interestsError }, userInterestsResponse] = await Promise.all([
     getInterests(),
-    getUserInterests(authUserId),
+    getUserInterests(),
   ]);
 
   return {
@@ -59,9 +58,17 @@ const OnboardingContent = async () => {
     redirect("/auth");
   }
 
-  const { interests, interestsError, userInterests, userInterestsError } = await fetchData(
-    userData.user.id,
-  );
+  const { error: profileError } = await getOrCreateUserProfile(supabase, userData.user);
+
+  if (profileError) {
+    return (
+      <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+        <p className="text-sm text-destructive">Не удалось загрузить профиль пользователя: {profileError}</p>
+      </section>
+    );
+  }
+
+  const { interests, interestsError, userInterests, userInterestsError } = await fetchData();
 
   return (
     <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">

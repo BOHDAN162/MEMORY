@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { logout } from "@/app/auth/actions";
 import { Button } from "@/components/ui/button";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type LogoutButtonProps = {
   className?: string;
@@ -11,37 +11,27 @@ type LogoutButtonProps = {
 
 export const LogoutButton = ({ className }: LogoutButtonProps) => {
   const [error, setError] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessing, startTransition] = useTransition();
   const router = useRouter();
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const handleLogout = async () => {
-    if (!supabase) {
-      setError(
-        "Supabase client is not configured. Проверьте NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-      );
-      return;
-    }
-
-    setIsProcessing(true);
     setError(null);
 
-    try {
-      const { error: signOutError } = await supabase.auth.signOut();
+    startTransition(() => {
+      logout()
+        .then((result) => {
+          if (result?.error) {
+            setError(result.error);
+            return;
+          }
 
-      if (signOutError) {
-        setError(signOutError.message);
-        return;
-      }
-
-      router.push("/auth");
-      router.refresh();
-    } catch (signOutException) {
-      console.error("Failed to sign out", signOutException);
-      setError("Не удалось выйти. Попробуйте ещё раз.");
-    } finally {
-      setIsProcessing(false);
-    }
+          router.push("/auth");
+          router.refresh();
+        })
+        .catch(() => {
+          setError("Не удалось выйти. Попробуйте ещё раз.");
+        });
+    });
   };
 
   return (

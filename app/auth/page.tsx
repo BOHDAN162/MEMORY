@@ -4,11 +4,32 @@ import { getSupabaseCredentials } from "@/lib/config/env";
 import { getServerSession } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-const AuthPage = async () => {
+type AuthPageProps = {
+  searchParams?: {
+    returnTo?: string;
+  };
+};
+
+const sanitizeRedirectTo = (value?: string) => {
+  if (!value || !value.startsWith("/")) {
+    return "/content";
+  }
+
+  const normalized = value.startsWith("//") ? value.replace(/^\/+/, "/") : value;
+
+  if (normalized === "/auth") {
+    return "/content";
+  }
+
+  return normalized || "/content";
+};
+
+const AuthPage = async ({ searchParams }: AuthPageProps) => {
+  const redirectTo = sanitizeRedirectTo(searchParams?.returnTo);
   const session = await getServerSession();
 
   if (session) {
-    redirect("/content");
+    redirect(redirectTo);
   }
 
   const credentials = getSupabaseCredentials();
@@ -33,7 +54,7 @@ const AuthPage = async () => {
           </div>
         ) : null}
 
-        <AuthForm hasCredentials={hasCredentials} />
+        <AuthForm hasCredentials={hasCredentials} redirectTo={redirectTo} />
 
         <p className="text-xs text-muted-foreground">
           После входа вы автоматически вернётесь на /content и увидите персональные интересы.

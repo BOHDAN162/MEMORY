@@ -25,7 +25,7 @@ export const saveUserInterests = async (formData: FormData): Promise<SaveUserInt
 
   const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
     supabase,
-    authUser.user.id,
+    authUser.user,
   );
 
   if (userIdError || !userId) {

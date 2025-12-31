@@ -1,11 +1,17 @@
 import { AppShell } from "@/components/layout/app-shell";
-import { getServerSession } from "@/lib/supabase/server";
+import { getOrCreateUserProfile } from "@/lib/server/user-profile";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ReactNode } from "react";
 
 const AppLayout = async ({ children }: { children: ReactNode }) => {
-  const session = await getServerSession();
+  const supabase = await createSupabaseServerClient();
+  const { data } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
 
-  return <AppShell isAuthenticated={Boolean(session)}>{children}</AppShell>;
+  if (supabase && data.session?.user) {
+    await getOrCreateUserProfile(supabase, data.session.user);
+  }
+
+  return <AppShell isAuthenticated={Boolean(data.session)}>{children}</AppShell>;
 };
 
 export default AppLayout;

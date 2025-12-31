@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { signInWithPassword, signUpWithPassword } from "@/app/auth/actions";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils/cn";
 
 type AuthMode = "sign-in" | "sign-up";
@@ -19,19 +19,11 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
   const router = useRouter();
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const handleAuth = async () => {
-    if (!supabase) {
-      setError(
-        "Supabase client is not configured. Проверьте NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-      );
-      return;
-    }
-
     if (!email || !password) {
       setError("Введите email и пароль.");
       return;
@@ -39,48 +31,34 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
 
     setError(null);
     setMessage(null);
-    setIsSubmitting(true);
 
-    try {
-      if (mode === "sign-in") {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
+    const formData = new FormData();
+    formData.append("email", email);
+    formData.append("password", password);
+    formData.append("redirectTo", redirectTo);
+
+    const action = mode === "sign-in" ? signInWithPassword : signUpWithPassword;
+
+    startTransition(() => {
+      action(formData)
+        .then((result) => {
+          if (!result) {
+            return;
+          }
+
+          setError(result.error ?? null);
+          setMessage(result.message ?? null);
+          if (!result.error) {
+            router.refresh();
+          }
+        })
+        .catch((authError) => {
+          if (authError instanceof Error && authError.message.includes("NEXT_REDIRECT")) {
+            return;
+          }
+          setError("Не удалось выполнить запрос. Попробуйте ещё раз.");
         });
-
-        if (signInError) {
-          setError(signInError.message);
-          return;
-        }
-
-        router.push(redirectTo);
-        router.refresh();
-        return;
-      }
-
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
-      if (signUpError) {
-        setError(signUpError.message);
-        return;
-      }
-
-      if (data.session) {
-        router.push(redirectTo);
-        router.refresh();
-        return;
-      }
-
-      setMessage("Проверьте почту, чтобы подтвердить регистрацию. После подтверждения войдите снова.");
-    } catch (authError) {
-      console.error("Auth error", authError);
-      setError("Не удалось выполнить запрос. Попробуйте ещё раз.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   };
 
   return (
@@ -94,7 +72,7 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
             mode === "sign-in" ? "ring-1 ring-primary/60 shadow-inner shadow-primary/10" : "",
           )}
           onClick={() => setMode("sign-in")}
-          disabled={isSubmitting}
+          disabled={isPending}
         >
           Войти
         </button>
@@ -106,7 +84,7 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
             mode === "sign-up" ? "ring-1 ring-primary/60 shadow-inner shadow-primary/10" : "",
           )}
           onClick={() => setMode("sign-up")}
-          disabled={isSubmitting}
+          disabled={isPending}
         >
           Зарегистрироваться
         </button>
@@ -130,7 +108,7 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
             onChange={(event) => setEmail(event.target.value)}
             className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm shadow-inner shadow-black/5 outline-none ring-0 transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
             placeholder="you@example.com"
-            disabled={isSubmitting || !hasCredentials}
+            disabled={isPending || !hasCredentials}
           />
         </label>
 
@@ -146,7 +124,7 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
             onChange={(event) => setPassword(event.target.value)}
             className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm shadow-inner shadow-black/5 outline-none ring-0 transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
             placeholder="Минимум 6 символов"
-            disabled={isSubmitting || !hasCredentials}
+            disabled={isPending || !hasCredentials}
           />
         </label>
 
@@ -157,8 +135,8 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
           <p className="text-xs text-muted-foreground">
             Используется Supabase Auth. {mode === "sign-up" ? "После подтверждения войдите в систему." : "Введите email и пароль для входа."}
           </p>
-          <Button type="submit" disabled={!hasCredentials || isSubmitting} aria-busy={isSubmitting}>
-            {isSubmitting ? "Загрузка..." : mode === "sign-in" ? "Войти" : "Создать аккаунт"}
+          <Button type="submit" disabled={!hasCredentials || isPending} aria-busy={isPending}>
+            {isPending ? "Загрузка..." : mode === "sign-in" ? "Войти" : "Создать аккаунт"}
           </Button>
         </div>
       </form>
