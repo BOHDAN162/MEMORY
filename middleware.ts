@@ -2,43 +2,74 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createSupabaseMiddlewareClient } from "@/lib/supabase/middleware";
 
-const protectedPaths = ["/content", "/map", "/profile", "/settings", "/community", "/admin"];
+const PROTECTED_PATHS = [
+  "/content",
+  "/map",
+  "/profile",
+  "/community",
+  "/memoryverse",
+  "/settings",
+  "/admin",
+];
 
 const isProtectedPath = (pathname: string) =>
-  protectedPaths.some(
+  PROTECTED_PATHS.some(
     (protectedPath) =>
       pathname === protectedPath || pathname.startsWith(`${protectedPath}/`),
   );
 
-const buildRedirectUrl = (request: NextRequest) => {
-  const redirectUrl = new URL("/auth", request.url);
-  const returnTo = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+const isAuthPath = (pathname: string) => pathname.startsWith("/auth");
 
-  if (returnTo && returnTo !== "/auth") {
-    redirectUrl.searchParams.set("returnTo", returnTo);
+const sanitizeReturnUrl = (value?: string | null) => {
+  if (!value) {
+    return "/content";
   }
 
-  return redirectUrl;
+  const decoded =
+    typeof value === "string"
+      ? (() => {
+          try {
+            return decodeURIComponent(value);
+          } catch {
+            return value;
+          }
+        })()
+      : "";
+
+  if (!decoded.startsWith("/")) {
+    return "/content";
+  }
+
+  const normalized = decoded.startsWith("//") ? decoded.replace(/^\/+/, "/") : decoded;
+
+  if (normalized === "/auth") {
+    return "/content";
+  }
+
+  return normalized || "/content";
 };
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  if (!isProtectedPath(pathname) || pathname.startsWith("/auth")) {
-    return NextResponse.next();
-  }
+  const { pathname, searchParams, search } = request.nextUrl;
 
   const response = NextResponse.next();
   const supabase = createSupabaseMiddlewareClient(request, response);
+  const { data } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
+  const isAuthed = Boolean(data?.session);
 
-  if (!supabase) {
-    return NextResponse.redirect(buildRedirectUrl(request));
+  const protectedRoute = isProtectedPath(pathname);
+  const authRoute = isAuthPath(pathname);
+
+  if (protectedRoute && !isAuthed) {
+    const returnUrl = `${pathname}${search}`;
+    const redirectUrl = new URL(`/auth?returnUrl=${encodeURIComponent(returnUrl)}`, request.url);
+    return NextResponse.redirect(redirectUrl);
   }
 
-  const { data, error } = await supabase.auth.getSession();
-
-  if (error || !data.session) {
-    return NextResponse.redirect(buildRedirectUrl(request));
+  if (authRoute && isAuthed) {
+    const targetUrl = sanitizeReturnUrl(searchParams.get("returnUrl"));
+    const redirectUrl = new URL(targetUrl, request.url);
+    return NextResponse.redirect(redirectUrl);
   }
 
   return response;
@@ -46,6 +77,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+    "/((?!_next/|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/).*)",
   ],
 };

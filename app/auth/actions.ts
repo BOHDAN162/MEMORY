@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 
 type AuthResult = { error?: string | null; message?: string | null };
 
-const sanitizeRedirectTo = (value: string | null | undefined) => {
+const sanitizeReturnUrl = (value: string | null | undefined) => {
   if (!value || typeof value !== "string") {
     return "/content";
   }
@@ -27,7 +27,7 @@ const sanitizeRedirectTo = (value: string | null | undefined) => {
 export const signInWithPassword = async (formData: FormData): Promise<AuthResult | void> => {
   const email = formData.get("email")?.toString().trim() ?? "";
   const password = formData.get("password")?.toString() ?? "";
-  const redirectTo = sanitizeRedirectTo(formData.get("redirectTo")?.toString());
+  const returnUrl = sanitizeReturnUrl(formData.get("returnUrl")?.toString());
 
   if (!email || !password) {
     return { error: "Введите email и пароль." };
@@ -51,13 +51,13 @@ export const signInWithPassword = async (formData: FormData): Promise<AuthResult
     await getOrCreateUserProfile(supabase, data.user);
   }
 
-  redirect(redirectTo);
+  redirect(returnUrl);
 };
 
 export const signUpWithPassword = async (formData: FormData): Promise<AuthResult> => {
   const email = formData.get("email")?.toString().trim() ?? "";
   const password = formData.get("password")?.toString() ?? "";
-  const redirectTo = sanitizeRedirectTo(formData.get("redirectTo")?.toString());
+  const returnUrl = sanitizeReturnUrl(formData.get("returnUrl")?.toString());
 
   if (!email || !password) {
     return { error: "Введите email и пароль." };
@@ -81,7 +81,7 @@ export const signUpWithPassword = async (formData: FormData): Promise<AuthResult
 
   if (data.session && authUser) {
     await getOrCreateUserProfile(supabase, authUser);
-    redirect(redirectTo);
+    redirect(returnUrl);
   }
 
   return {
