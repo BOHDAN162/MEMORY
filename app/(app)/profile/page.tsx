@@ -1,27 +1,58 @@
 import { ProfileGamification } from "@/components/features/gamification/profile-gamification";
 import { TelegramSection } from "@/components/features/profile/telegram-section";
 import { PlaceholderCard } from "@/components/features/placeholder-card";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient, getServerSession } from "@/lib/supabase/server";
 import { getOrCreateUserProfile } from "@/lib/server/user-profile";
 
-const loadTelegramUsername = async (): Promise<string | null> => {
+type ProfileData = {
+  email: string | null;
+  telegramUsername: string | null;
+  error: string | null;
+};
+
+const loadProfileData = async (): Promise<ProfileData> => {
   const supabase = await createSupabaseServerClient();
+
   if (!supabase) {
-    return null;
+    return {
+      email: null,
+      telegramUsername: null,
+      error: "Supabase client is not configured. Check environment variables.",
+    };
   }
 
-  const { data: profile } = await getOrCreateUserProfile(supabase);
+  const session = await getServerSession();
 
-  return profile?.telegram_username ?? null;
+  const { data: authUser, error: authError } = await supabase.auth.getUser();
+  const email = session?.user.email ?? authUser?.user?.email ?? null;
+
+  if (authError || !authUser?.user) {
+    return { email, telegramUsername: null, error: "Не удалось загрузить профиль." };
+  }
+
+  const { data: profile, error: profileError } = await getOrCreateUserProfile(
+    supabase,
+    authUser.user,
+  );
+
+  return {
+    email,
+    telegramUsername: profile?.telegram_username ?? null,
+    error: profileError,
+  };
 };
 
 const ProfilePage = async () => {
-  const telegramUsername = await loadTelegramUsername();
+  const profileData = await loadProfileData();
 
   return (
     <div className="space-y-6">
       <ProfileGamification />
-      <TelegramSection initialUsername={telegramUsername} />
+      <TelegramSection
+        initialUsername={profileData.telegramUsername}
+        email={profileData.email}
+        loadError={profileData.error}
+      />
       <PlaceholderCard
         title="Профиль"
         description={[

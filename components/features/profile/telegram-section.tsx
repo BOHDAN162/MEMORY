@@ -2,8 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { updateTelegramUsername } from "@/app/actions/update-telegram-username";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils/cn";
+import { Button } from "@/components/ui/button";
 
 type StatusMessage = {
   type: "success" | "error";
@@ -12,11 +11,12 @@ type StatusMessage = {
 
 type TelegramSectionProps = {
   initialUsername: string | null;
+  email: string | null;
+  loadError?: string | null;
 };
 
-export const TelegramSection = ({ initialUsername }: TelegramSectionProps) => {
+export const TelegramSection = ({ initialUsername, email, loadError }: TelegramSectionProps) => {
   const [inputValue, setInputValue] = useState(() => initialUsername ?? "");
-  const [savedUsername, setSavedUsername] = useState(() => initialUsername ?? "");
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -35,13 +35,10 @@ export const TelegramSection = ({ initialUsername }: TelegramSectionProps) => {
       }
 
       const normalized = result.username ?? "";
-      setSavedUsername(normalized);
       setInputValue(normalized);
       setStatus({ type: "success", message: "Сохранено" });
     });
   };
-
-  const writeLink = savedUsername ? `https://t.me/${savedUsername}` : null;
 
   return (
     <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
@@ -54,22 +51,23 @@ export const TelegramSection = ({ initialUsername }: TelegramSectionProps) => {
               Добавьте username, чтобы участники могли связаться с вами напрямую.
             </p>
           </div>
-          {writeLink ? (
-            <a
-              href={writeLink}
-              target="_blank"
-              rel="noreferrer noopener"
-              className={cn(
-                buttonVariants({ variant: "ghost" }),
-                "border border-border/80 text-primary",
-              )}
-            >
-              Написать в Telegram
-            </a>
-          ) : null}
         </header>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="email" className="text-sm font-medium text-foreground">
+              Email
+            </label>
+            <input
+              id="email"
+              value={email ?? ""}
+              readOnly
+              disabled
+              className="w-full cursor-not-allowed rounded-xl border border-border bg-muted px-4 py-3 text-sm text-muted-foreground shadow-inner shadow-black/5 transition"
+              placeholder="Email недоступен"
+            />
+          </div>
+
           <div className="flex flex-col gap-2">
             <label htmlFor="telegram_username" className="text-sm font-medium text-foreground">
               Telegram username
@@ -79,14 +77,16 @@ export const TelegramSection = ({ initialUsername }: TelegramSectionProps) => {
               name="telegram_username"
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
-              placeholder="username without @"
+              placeholder="@username"
               className="w-full rounded-xl border border-border bg-background/60 px-4 py-3 text-sm shadow-inner shadow-black/5 transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-muted-foreground">
-              {status ? (
+              {loadError ? (
+                <span className="text-destructive">{loadError}</span>
+              ) : status ? (
                 <span
                   className={status.type === "success" ? "text-green-600" : "text-destructive"}
                 >
