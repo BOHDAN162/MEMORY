@@ -26,7 +26,7 @@ import {
   type OnNodesChange,
   type OnNodeDrag,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 
 type InterestNodeData = {
   title: string;
@@ -40,9 +40,16 @@ type MapCanvasProps = {
 
 type InterestFlowNode = Node<InterestNodeData>;
 
-const InterestNodeCard = ({ data }: NodeProps<InterestFlowNode>) => {
+const InterestNodeCard = ({ data, selected }: NodeProps<InterestFlowNode>) => {
   return (
-    <div className="min-w-[180px] rounded-2xl border border-border/70 bg-card/90 px-4 py-3 text-left shadow-lg shadow-black/20 ring-1 ring-inset ring-primary/10 backdrop-blur">
+    <div
+      className={cn(
+        "min-w-[180px] rounded-2xl border border-border/70 bg-card/90 px-4 py-3 text-left shadow-lg shadow-black/20 ring-1 ring-inset ring-primary/10 backdrop-blur transition",
+        selected
+          ? "scale-[1.01] border-primary/60 shadow-primary/30 ring-2 ring-primary/60"
+          : "hover:border-primary/40 hover:ring-primary/20",
+      )}
+    >
       <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
         {clusterKey(data.cluster)}
       </p>
@@ -249,7 +256,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     () => mergeEdges(autoEdges, initialManualEdges),
     [autoEdges, initialManualEdges],
   );
-  const [nodes, , onNodesChange] = useNodesState<InterestFlowNode>(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState<InterestFlowNode>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [manualEdgesState, setManualEdgesState] = useState<ManualEdgeState[]>(initialManualEdges);
   const [lastSavedPositions, setLastSavedPositions] = useState<
@@ -270,6 +277,9 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const [edgePendingKey, setEdgePendingKey] = useState<string | null>(null);
   const reactFlow = useReactFlow();
   const hasFittedRef = useRef(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectionHint, setSelectionHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (!shouldFitView || hasFittedRef.current || nodes.length === 0) return;
@@ -335,6 +345,33 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setSelectedEdgeId(selected?.id ?? null);
   }, []);
 
+  const selectSingle = useCallback((id: string) => setSelectedIds(new Set([id])), []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const selectedInterestIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
+
+  const isSelected = useCallback(
+    (id: string) => {
+      return selectedIds.has(id);
+    },
+    [selectedIds],
+  );
+
   const persistPosition = useCallback(
     async (interestId: string, position: { x: number; y: number }) => {
       setPendingNodeId(interestId);
@@ -396,6 +433,10 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
       const next = !prev;
       if (!next) {
         setConnectFromId(null);
+        setSelectionHint(null);
+      } else {
+        setSelectionMode(false);
+        setSelectionHint("Режим выбора недоступен, пока включено «Соединить».");
       }
       return next;
     });
@@ -438,26 +479,62 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     [manualEdgePairs],
   );
 
+  const handleSelectionModeToggle = useCallback(() => {
+    if (connectMode) {
+      setSelectionHint("Сначала отключите «Соединить», чтобы включить выбор.");
+      return;
+    }
+    setSelectionHint(null);
+    setSelectionMode((prev) => !prev);
+  }, [connectMode]);
+
   const handleNodeClick = useCallback(
-    (_event: unknown, node: InterestFlowNode) => {
-      if (!connectMode || !node?.id || edgePendingKey) return;
+    (event: ReactMouseEvent, node: InterestFlowNode) => {
+      if (!node?.id) return;
 
-      setEdgeError(null);
+      if (connectMode) {
+        if (edgePendingKey) return;
 
-      if (!connectFromId) {
-        setConnectFromId(node.id);
+        setEdgeError(null);
+
+        if (!connectFromId) {
+          setConnectFromId(node.id);
+          return;
+        }
+
+        if (connectFromId === node.id) {
+          setEdgeError("Выберите другой узел, чтобы создать связь.");
+          return;
+        }
+
+        void createManualEdge(connectFromId, node.id);
         return;
       }
 
-      if (connectFromId === node.id) {
-        setEdgeError("Выберите другой узел, чтобы создать связь.");
-        return;
-      }
+      const hasToggleModifier = event.ctrlKey || event.metaKey || event.shiftKey;
 
-      void createManualEdge(connectFromId, node.id);
+      if (selectionMode || hasToggleModifier) {
+        toggleSelect(node.id);
+      } else {
+        selectSingle(node.id);
+      }
     },
-    [connectFromId, connectMode, createManualEdge, edgePendingKey],
+    [
+      connectFromId,
+      connectMode,
+      createManualEdge,
+      edgePendingKey,
+      selectSingle,
+      selectionMode,
+      toggleSelect,
+    ],
   );
+
+  const handlePaneClick = useCallback(() => {
+    if (connectMode) return;
+    clearSelection();
+    setSelectedEdgeId(null);
+  }, [clearSelection, connectMode]);
 
   const handleDeleteManualEdge = useCallback(async () => {
     if (!selectedEdgeId) return;
@@ -486,6 +563,15 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
 
     setEdgePendingKey(null);
   }, [edges, selectedEdgeId]);
+
+  useEffect(() => {
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => ({
+        ...node,
+        selected: isSelected(node.id),
+      })),
+    );
+  }, [isSelected, setNodes, selectedIds]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -542,6 +628,10 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
       : "Соединить: выберите 2 интереса, чтобы создать связь."
     : "Нажмите «Соединить», чтобы добавить ручные связи.";
 
+  const selectionStatus = selectionMode
+    ? "Режим выбора: тапните или кликните, чтобы добавить/убрать из множества."
+    : "Для множественного выбора используйте Ctrl/⌘/Shift или включите «Выбор».";
+
   const positionStatus =
     pendingNodeId && isSaving
       ? "Сохраняем позицию..."
@@ -583,6 +673,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
             onNodeDragStop={handleNodeDragStop}
             onNodeClick={handleNodeClick}
             onSelectionChange={handleSelectionChange}
+            onPaneClick={handlePaneClick}
             className={cn("bg-gradient-to-b from-background to-background/60")}
           >
             <Background gap={18} size={1.5} color="rgba(255,255,255,0.08)" />
@@ -617,6 +708,22 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
                 </button>
                 <button
                   type="button"
+                  onClick={handleSelectionModeToggle}
+                  disabled={connectMode}
+                  aria-pressed={selectionMode}
+                  className={cn(
+                    "rounded-full border px-3 py-1 font-semibold transition",
+                    connectMode
+                      ? "cursor-not-allowed border-border/70 bg-muted text-muted-foreground"
+                      : selectionMode
+                        ? "border-primary/70 bg-primary/90 text-primary-foreground shadow-sm shadow-primary/30"
+                        : "border-border bg-card text-foreground hover:border-primary/40 hover:text-primary",
+                  )}
+                >
+                  Выбор
+                </button>
+                <button
+                  type="button"
                   onClick={() => void handleDeleteManualEdge()}
                   disabled={!canDeleteSelected || Boolean(edgePendingKey)}
                   className={cn(
@@ -631,8 +738,33 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
               </div>
               <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-muted-foreground">
                 <p className="text-foreground/80">{connectHint}</p>
+                <p className="text-foreground/80">{selectionStatus}</p>
                 <p>{edgeStatus}</p>
                 {edgeError ? <p className="text-destructive">{edgeError}</p> : null}
+                {selectionHint ? <p className="text-primary">{selectionHint}</p> : null}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-border/80 bg-card/70 px-3 py-2 text-[11px] text-foreground shadow-inner shadow-black/5">
+                <span className="font-semibold">Выбрано: {selectedInterestIds.length}</span>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  disabled={selectedInterestIds.length === 0}
+                  className={cn(
+                    "rounded-full px-2 py-1 font-semibold",
+                    selectedInterestIds.length === 0
+                      ? "cursor-not-allowed bg-muted text-muted-foreground"
+                      : "bg-primary/10 text-primary hover:bg-primary/20",
+                  )}
+                >
+                  Сбросить
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  className="rounded-full bg-muted px-2 py-1 font-semibold text-muted-foreground"
+                >
+                  Подобрать по выбранным
+                </button>
               </div>
             </Panel>
           </ReactFlow>
