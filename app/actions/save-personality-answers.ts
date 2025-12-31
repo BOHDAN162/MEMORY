@@ -95,6 +95,8 @@ export const savePersonalityAnswers = async (
   }
 
   revalidatePath("/onboarding");
+  revalidatePath("/profile");
+  revalidatePath("/profile/personality");
 
   return { error: null, message: "Сохранено" };
 };

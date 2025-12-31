@@ -1,20 +1,11 @@
 import { InterestSelector } from "@/components/features/interests/interest-selector";
-import { PersonalityQuiz } from "@/components/features/onboarding/personality-quiz";
+import { ONBOARDING_CLUSTER_ORDER, ONBOARDING_MIN_INTERESTS, selectAnchoredInterests } from "@/lib/config/onboarding";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getInterests, getUserInterests } from "@/lib/server/interests";
 import { getOrCreateUserProfile } from "@/lib/server/user-profile";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Interest } from "@/lib/types/interests";
-import type { PersonalityAnswerFields } from "@/lib/types/personality";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-
-type PersonalityAnswerRow = {
-  q1: number | null;
-  q2: number | null;
-  q3: number | null;
-  q4: number | null;
-  q5: number | null;
-};
 
 const fetchData = async (): Promise<{
   interests: Interest[];
@@ -87,39 +78,24 @@ const OnboardingContent = async () => {
     );
   }
 
-  const [{ data: rawPersonalityAnswers, error: personalityAnswersError }, onboardingData] =
-    await Promise.all([
-      supabase
-        .from("personality_answers")
-        .select("q1, q2, q3, q4, q5")
-        .eq("user_id", profile.id)
-        .maybeSingle<PersonalityAnswerRow>(),
-      fetchData(),
-    ]);
+  const onboardingData = await fetchData();
 
-  const personalityAnswers: PersonalityAnswerFields | null = rawPersonalityAnswers
-    ? {
-        q1: rawPersonalityAnswers.q1 ?? null,
-        q2: rawPersonalityAnswers.q2 ?? null,
-        q3: rawPersonalityAnswers.q3 ?? null,
-        q4: rawPersonalityAnswers.q4 ?? null,
-        q5: rawPersonalityAnswers.q5 ?? null,
-      }
-    : null;
+  if (onboardingData.userInterests.length > 0) {
+    redirect("/map");
+  }
 
   const { interests, interestsError, userInterests, userInterestsError } = onboardingData;
+  const anchoredInterests = selectAnchoredInterests(interests);
 
   return (
     <div className="flex flex-col gap-6">
-      <PersonalityQuiz initialAnswers={personalityAnswers} loadError={personalityAnswersError?.message} />
-
       <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
         <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.25em] text-primary">Onboarding</p>
-            <h2 className="text-2xl font-semibold">Выбор интересов</h2>
+            <h2 className="text-2xl font-semibold">Быстрый старт: выбери интересы</h2>
             <p className="text-sm text-muted-foreground">
-              Выберите интересы и сохраните их. Данные сохраняются для текущего пользователя.
+              Минимум {ONBOARDING_MIN_INTERESTS} интереса, чтобы собрать для тебя карту. Можно менять в любой момент.
             </p>
           </div>
         </div>
@@ -136,10 +112,16 @@ const OnboardingContent = async () => {
           </p>
         ) : null}
 
-        {interests.length > 0 ? (
+        {anchoredInterests.length > 0 ? (
           <InterestSelector
-            interests={interests}
+            interests={anchoredInterests}
             initialSelected={userInterests}
+            minimumSelected={ONBOARDING_MIN_INTERESTS}
+            selectionHint="Выбери минимум 3 интереса, чтобы продолжить"
+            onSuccessRedirect="/map"
+            submitLabel="Продолжить к карте"
+            groupByCluster
+            clusterOrder={ONBOARDING_CLUSTER_ORDER}
           />
         ) : (
           <p className="text-sm text-muted-foreground">
