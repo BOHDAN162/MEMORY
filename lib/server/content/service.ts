@@ -15,6 +15,7 @@ type GetContentParams = {
   interestIds: string[];
   limit?: number;
   locale?: string;
+  mode?: "selected" | "all";
 };
 
 type ProviderDebugInfo = {
@@ -64,6 +65,7 @@ export const getContent = async (
       interestIds: interestIdsSorted,
       limit: effectiveLimit,
       locale: effectiveLocale,
+      mode: params.mode ?? "all",
     };
 
     const defaultHashInput =
@@ -73,6 +75,7 @@ export const getContent = async (
             interestIds: interestIdsSorted,
             limit: effectiveLimit,
             locale: effectiveLocale,
+            mode: request.mode,
           })
         : {
             v: 1,
@@ -80,6 +83,7 @@ export const getContent = async (
             interestIds: interestIdsSorted,
             limit: effectiveLimit ?? null,
             locale: effectiveLocale ?? null,
+            mode: request.mode ?? null,
           };
 
     let hashInput: object | string = defaultHashInput;

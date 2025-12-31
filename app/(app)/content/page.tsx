@@ -3,6 +3,7 @@ import { getContent } from "@/lib/server/content/service";
 import type { ContentProviderId } from "@/lib/server/content/types";
 import { getUserInterests } from "@/lib/server/interests";
 import { buttonVariants } from "@/components/ui/button";
+import PromptCopyButton from "@/components/features/content/prompt-copy-button";
 
 type ContentPageProps = {
   searchParams?: {
@@ -32,7 +33,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   const debugParamRaw = searchParams?.debug;
   const debugParam = Array.isArray(debugParamRaw) ? debugParamRaw[0] : debugParamRaw;
 
-  const providerIds: ContentProviderId[] = ["youtube", "books", "articles", "telegram"];
+  const providerIds: ContentProviderId[] = ["youtube", "books", "articles", "telegram", "prompts"];
   let interestIds: string[] = [];
   let interestsError: string | null = null;
 
@@ -64,6 +65,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         providerIds,
         interestIds,
         limit: 20,
+        mode: selectionMode,
       })
     : null;
 
@@ -109,51 +111,92 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
 
       {cards.length > 0 ? (
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {cards.map((item) => (
-            <li
-              key={`${item.provider}:${item.id}`}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-background/80 p-4 shadow-inner shadow-black/5"
-            >
-              <div className="flex items-center justify-between gap-2 text-xs uppercase text-muted-foreground">
-                <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-semibold tracking-wide text-primary">
-                  {item.provider}
-                </span>
-                <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-medium">
-                  {item.type}
-                </span>
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
-                {item.description ? (
-                  <p className="text-sm text-muted-foreground">{item.description}</p>
-                ) : null}
-                {item.why ? <p className="text-xs text-foreground/80">Почему: {item.why}</p> : null}
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="rounded-full bg-muted px-2 py-1">
-                    Интересы: {item.interestIds.join(", ") || "—"}
+          {cards.map((item) => {
+            const promptMeta = item.type === "prompt" && item.meta ? item.meta : null;
+            const promptText =
+              promptMeta && typeof (promptMeta as { promptText?: unknown }).promptText === "string"
+                ? (promptMeta as { promptText: string }).promptText
+                : null;
+            const promptTags =
+              promptMeta && Array.isArray((promptMeta as { tags?: unknown }).tags)
+                ? (
+                    (promptMeta as { tags: unknown[] }).tags.filter(
+                      (tag): tag is string => typeof tag === "string" && Boolean(tag),
+                    )
+                  ).slice(0, 4)
+                : [];
+
+            return (
+              <li
+                key={`${item.provider}:${item.id}`}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-background/80 p-4 shadow-inner shadow-black/5"
+              >
+                <div className="flex items-center justify-between gap-2 text-xs uppercase text-muted-foreground">
+                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-semibold tracking-wide text-primary">
+                    {item.provider.toUpperCase()}
                   </span>
-                  {item.score !== null && item.score !== undefined ? (
-                    <span className="rounded-full bg-muted px-2 py-1">Score: {item.score}</span>
+                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-medium">
+                    {item.type.toUpperCase()}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+                  {item.description ? (
+                    <p className="text-sm text-muted-foreground">{item.description}</p>
                   ) : null}
-                  {item.cachedAt ? (
+                  {item.why ? (
+                    <p className="text-xs text-foreground/80">Почему рекомендовано: {item.why}</p>
+                  ) : null}
+                  {item.type === "prompt" && promptText ? (
+                    <div className="space-y-2 rounded-lg bg-muted/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+                        Текст промпта
+                      </p>
+                      <p className="text-sm leading-relaxed text-foreground">{promptText}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <PromptCopyButton text={promptText} />
+                        {promptTags.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {promptTags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full bg-background px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                     <span className="rounded-full bg-muted px-2 py-1">
-                      Cached: {new Date(item.cachedAt).toLocaleString()}
+                      Интересы: {item.interestIds.join(", ") || "—"}
                     </span>
+                    {item.score !== null && item.score !== undefined ? (
+                      <span className="rounded-full bg-muted px-2 py-1">Score: {item.score}</span>
+                    ) : null}
+                    {item.cachedAt ? (
+                      <span className="rounded-full bg-muted px-2 py-1">
+                        Cached: {new Date(item.cachedAt).toLocaleString()}
+                      </span>
+                    ) : null}
+                  </div>
+                  {item.url ? (
+                    <a
+                      className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
+                      href={item.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Открыть
+                    </a>
                   ) : null}
                 </div>
-                {item.url ? (
-                  <a
-                    className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
-                    href={item.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Открыть
-                  </a>
-                ) : null}
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="text-muted-foreground">Контента пока нет — провайдеры вернули пустой список.</p>
