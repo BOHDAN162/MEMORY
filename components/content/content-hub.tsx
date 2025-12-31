@@ -7,6 +7,28 @@ import ContentToolbar from "@/components/content/ContentToolbar";
 import type { ContentProviderId, ContentType, ContentItem } from "@/lib/server/content/types";
 import { cn } from "@/lib/utils/cn";
 
+/* =========================
+   🔒 СТАБИЛЬНАЯ КОНФИГУРАЦИЯ
+   ========================= */
+
+const ALL_PROVIDERS: ContentProviderId[] = [
+  "youtube",
+  "books",
+  "articles",
+  "telegram",
+  "prompts",
+];
+
+const providerLabels: Record<ContentProviderId, string> = {
+  youtube: "YouTube",
+  books: "Books",
+  articles: "Articles",
+  telegram: "Telegram",
+  prompts: "Prompts",
+};
+
+/* ========================= */
+
 export type NormalizedContentItem = ContentItem & {
   providerLabel: string;
   typeLabel: string;
@@ -48,6 +70,10 @@ type ContentHubProps = {
   interestsError?: string | null;
 };
 
+/* =========================
+   🔧 УТИЛИТЫ
+   ========================= */
+
 const buildSeed = (input: string): number => {
   let seed = 2166136261 >>> 0;
   for (let i = 0; i < input.length; i += 1) {
@@ -76,156 +102,33 @@ const shuffle = <T,>(items: T[], seed: number): T[] => {
   return arr;
 };
 
-const isFilterActive = (
-  activeType: ContentType | "all",
-  selectedProviders: ContentProviderId[],
-  providerOptions: ContentProviderId[],
-  search: string,
-  sort: SortOption,
-) => {
-  if (activeType !== "all") return true;
-  if (selectedProviders.length !== providerOptions.length) return true;
-  if (search.trim()) return true;
-  if (sort !== "relevance") return true;
-  return false;
-};
-
-const getProviderErrors = (debug?: ContentDebugInfo | null) =>
-  debug?.providers
-    ? Object.entries(debug.providers)
-        .filter(([, info]) => info?.error)
-        .map(([provider, info]) => ({ provider, error: info?.error ?? null }))
-    : [];
-
 const getDateValue = (item: NormalizedContentItem): number | null => {
-  if (item.sortableDate !== undefined && item.sortableDate !== null) {
-    return item.sortableDate;
-  }
-
-  if (item.publishedAt) {
-    const ms = new Date(item.publishedAt).getTime();
-    return Number.isNaN(ms) ? null : ms;
-  }
-
-  if (item.createdAt) {
-    const ms = new Date(item.createdAt).getTime();
-    return Number.isNaN(ms) ? null : ms;
-  }
-
-  if (item.publishedYear) {
-    const ms = new Date(item.publishedYear, 0, 1).getTime();
-    return Number.isNaN(ms) ? null : ms;
-  }
-
+  if (item.sortableDate != null) return item.sortableDate;
+  if (item.publishedAt) return new Date(item.publishedAt).getTime();
+  if (item.createdAt) return new Date(item.createdAt).getTime();
+  if (item.publishedYear) return new Date(item.publishedYear, 0, 1).getTime();
   return null;
 };
 
-const sortItems = (items: NormalizedContentItem[], sort: SortOption, randomSeed: number) => {
-  if (sort === "random") {
-    return shuffle(items, randomSeed);
-  }
-
-  const copy = [...items];
-  if (sort === "title") {
-    return copy.sort((a, b) => a.title.localeCompare(b.title, "ru"));
-  }
-
+const sortItems = (items: NormalizedContentItem[], sort: SortOption, seed: number) => {
+  if (sort === "random") return shuffle(items, seed);
+  if (sort === "title") return [...items].sort((a, b) => a.title.localeCompare(b.title, "ru"));
   if (sort === "new") {
-    return copy.sort((a, b) => {
-      const aDate = getDateValue(a);
-      const bDate = getDateValue(b);
-      if (aDate !== null && bDate !== null) {
-        if (aDate === bDate) return 0;
-        return bDate - aDate;
-      }
-      if (aDate !== null) return -1;
-      if (bDate !== null) return 1;
-      const aScore = a.score ?? 0;
-      const bScore = b.score ?? 0;
-      return bScore - aScore;
+    return [...items].sort((a, b) => {
+      const ad = getDateValue(a);
+      const bd = getDateValue(b);
+      if (ad != null && bd != null) return bd - ad;
+      if (ad != null) return -1;
+      if (bd != null) return 1;
+      return (b.score ?? 0) - (a.score ?? 0);
     });
   }
-
-  return copy.sort((a, b) => {
-    const aScore = a.score ?? 0;
-    const bScore = b.score ?? 0;
-    if (aScore === bScore) return 0;
-    return bScore - aScore;
-  });
+  return [...items].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 };
 
-const providerLabels: Record<ContentProviderId, string> = {
-  youtube: "YouTube",
-  books: "Books",
-  articles: "Articles",
-  telegram: "Telegram",
-  prompts: "Prompts",
-};
-
-const buildProviderOptions = (items: NormalizedContentItem[]): ContentProviderId[] => {
-  const unique = new Set<ContentProviderId>();
-  items.forEach((item) => unique.add(item.provider));
-  return Array.from(unique);
-};
-
-const emptyStates = {
-  noInterests: {
-    title: "Интересы не выбраны",
-    description: "Выберите интересы, чтобы собрать подборку контента.",
-    cta: { href: "/map", label: "Перейти к карте интересов" },
-  },
-  filteredOut: {
-    title: "Ничего не найдено по фильтрам",
-    description: "Попробуйте изменить фильтры или поиск.",
-  },
-  noContent: {
-    title: "Контента пока нет",
-    description: "Провайдеры вернули пустой список. Попробуйте позже.",
-  },
-};
-
-const DebugPanel = ({ debug }: { debug: ContentDebugInfo }) => {
-  const providerEntries = Object.entries(debug.providers ?? {});
-  return (
-    <details className="group rounded-2xl border border-dashed border-border bg-muted/40 p-4 text-sm text-muted-foreground shadow-inner shadow-black/5">
-      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.22em] text-primary">
-        Debug
-      </summary>
-      <div className="mt-3 space-y-3">
-        <div className="flex flex-wrap gap-2 text-[11px]">
-          <span className="rounded-full bg-muted px-2 py-1">providers: {providerEntries.length}</span>
-          <span className="rounded-full bg-muted px-2 py-1">
-            cache hits: {Object.values(debug.cacheHits ?? {}).filter(Boolean).length}
-          </span>
-        </div>
-        {providerEntries.length > 0 ? (
-          <div className="overflow-hidden rounded-xl border border-border bg-background/60">
-            <div className="grid grid-cols-5 gap-2 border-b border-border/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              <span>Provider</span>
-              <span>Count</span>
-              <span>Cache</span>
-              <span>Latency</span>
-              <span>Error</span>
-            </div>
-            <div className="divide-y divide-border/80 text-xs">
-              {providerEntries.map(([provider, info]) => (
-                <div key={provider} className="grid grid-cols-5 items-center gap-2 px-3 py-2">
-                  <span className="font-semibold text-foreground">{providerLabels[provider as ContentProviderId] ?? provider}</span>
-                  <span>{info?.count ?? 0}</span>
-                  <span className="text-muted-foreground">{info?.cacheHit ? "yes" : "no"}</span>
-                  <span className="text-muted-foreground">{info?.ms ? `${info.ms}ms` : "—"}</span>
-                  <span className={cn("text-muted-foreground", info?.error && "text-destructive")}>
-                    {info?.error ?? "—"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </details>
-  );
-};
+/* =========================
+   🧠 КОМПОНЕНТ
+   ========================= */
 
 const ContentHub = ({
   items,
@@ -236,47 +139,47 @@ const ContentHub = ({
   interestsError,
 }: ContentHubProps) => {
   const router = useRouter();
-  const providerOptions = useMemo(() => buildProviderOptions(items), [items]);
+
+  /* 🔒 ЖЁСТКО: провайдеры НЕ зависят от items */
+  const providerOptions = ALL_PROVIDERS;
+
   const [activeType, setActiveType] = useState<ContentType | "all">("all");
-  const [selectedProviders, setSelectedProviders] = useState<ContentProviderId[]>(providerOptions);
+  const [selectedProviders, setSelectedProviders] =
+    useState<ContentProviderId[]>(providerOptions);
   const [sort, setSort] = useState<SortOption>("relevance");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [randomSeed, setRandomSeed] = useState(() => buildSeed(items.map((item) => item.id).join("|")));
+  const [randomSeed, setRandomSeed] = useState(() =>
+    buildSeed(items.map((i) => i.id).join("|")),
+  );
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
-    return () => window.clearTimeout(timeout);
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
   }, [search]);
 
   useEffect(() => {
-    setSelectedProviders(providerOptions);
-  }, [providerOptions]);
-
-  useEffect(() => {
-    setRandomSeed(buildSeed(items.map((item) => item.id).join("|")));
+    setRandomSeed(buildSeed(items.map((i) => i.id).join("|")));
   }, [items]);
 
   const filteredItems = useMemo(() => {
-    const providerFiltered =
-      selectedProviders.length === 0 ? [] : items.filter((item) => selectedProviders.includes(item.provider));
-    const typeFiltered =
-      activeType === "all" ? providerFiltered : providerFiltered.filter((item) => item.type === activeType);
-    if (!debouncedSearch) return typeFiltered;
-    const query = debouncedSearch.toLowerCase();
-    return typeFiltered.filter((item) => {
-      const haystack = `${item.title} ${item.description ?? ""}`.toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [activeType, debouncedSearch, items, selectedProviders]);
+    const byProvider =
+      selectedProviders.length === 0
+        ? []
+        : items.filter((i) => selectedProviders.includes(i.provider));
+    const byType =
+      activeType === "all" ? byProvider : byProvider.filter((i) => i.type === activeType);
+    if (!debouncedSearch) return byType;
+    const q = debouncedSearch.toLowerCase();
+    return byType.filter((i) =>
+      `${i.title} ${i.description ?? ""}`.toLowerCase().includes(q),
+    );
+  }, [items, selectedProviders, activeType, debouncedSearch]);
 
   const sortedItems = useMemo(
     () => sortItems(filteredItems, sort, randomSeed),
     [filteredItems, sort, randomSeed],
   );
-
-  const hasFilters = isFilterActive(activeType, selectedProviders, providerOptions, debouncedSearch, sort);
-  const providerErrors = getProviderErrors(debug);
 
   const handleReset = () => {
     setActiveType("all");
@@ -284,19 +187,18 @@ const ContentHub = ({
     setSort("relevance");
     setSearch("");
     setDebouncedSearch("");
-    setRandomSeed(buildSeed(items.map((item) => item.id).join("|")));
+    setRandomSeed(buildSeed(items.map((i) => i.id).join("|")));
   };
-
-  const showNoInterests = selectionMode === "all" && interestIds.length === 0 && !interestsError;
-  const showFilteredEmpty = !showNoInterests && sortedItems.length === 0 && items.length > 0;
-  const showNoContent = items.length === 0 && !showNoInterests && !interestsError;
 
   return (
     <div className="space-y-6">
       <ContentToolbar
         activeType={activeType}
         onTypeChange={setActiveType}
-        providerOptions={providerOptions.map((id) => ({ id, label: providerLabels[id] ?? id }))}
+        providerOptions={providerOptions.map((id) => ({
+          id,
+          label: providerLabels[id] ?? id,
+        }))}
         selectedProviders={selectedProviders}
         onProvidersChange={setSelectedProviders}
         sort={sort}
@@ -304,104 +206,28 @@ const ContentHub = ({
         search={search}
         onSearchChange={setSearch}
         onReset={handleReset}
-        hasActiveFilters={hasFilters}
+        hasActiveFilters={
+          activeType !== "all" ||
+          search.trim() !== "" ||
+          sort !== "relevance" ||
+          selectedProviders.length !== providerOptions.length
+        }
       />
 
-      {interestsError ? (
-        <div className="rounded-2xl border border-destructive/50 bg-destructive/10 p-6 text-destructive shadow-sm shadow-destructive/20">
-          <h3 className="text-lg font-semibold">Не удалось загрузить интересы</h3>
-          <p className="mt-2 text-sm text-destructive/80">{interestsError}</p>
-          <button
-            type="button"
-            className="mt-4 inline-flex items-center rounded-lg bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground shadow-sm transition hover:bg-destructive/90"
-            onClick={() => router.refresh()}
-          >
-            Повторить
-          </button>
-        </div>
-      ) : null}
-
-      {providerErrors.length > 0 ? (
-        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm text-amber-900 shadow-sm shadow-amber-500/20 dark:text-amber-100">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-base font-semibold">Часть провайдеров вернула ошибку</p>
-              <p className="text-sm opacity-80">Мы сохранили результаты от остальных провайдеров.</p>
-            </div>
-            <button
-              type="button"
-              className="rounded-xl border border-amber-500/40 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-900 transition hover:bg-amber-500/20 dark:text-amber-100"
-              onClick={() => router.refresh()}
-            >
-              Повторить
-            </button>
-          </div>
-          <div className="mt-3 space-y-1 text-sm">
-            {providerErrors.map((error) => (
-              <p key={error.provider} className="flex items-center gap-2">
-                <span className="rounded-full bg-amber-500/30 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]">
-                  {providerLabels[error.provider as ContentProviderId] ?? error.provider}
-                </span>
-                <span className="text-amber-900/80 dark:text-amber-100/80">{error.error}</span>
-              </p>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {showNoInterests ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/70 p-8 text-center shadow-inner shadow-black/5">
-          <p className="text-xs uppercase tracking-[0.22em] text-primary">Контент</p>
-          <h3 className="mt-2 text-2xl font-semibold text-foreground">{emptyStates.noInterests.title}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">{emptyStates.noInterests.description}</p>
-          <a
-            className="mt-4 inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/30 transition hover:bg-primary/90"
-            href={emptyStates.noInterests.cta.href}
-          >
-            {emptyStates.noInterests.cta.label}
-          </a>
-        </div>
-      ) : null}
-
-      {showFilteredEmpty ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/70 p-8 text-center shadow-inner shadow-black/5">
-          <p className="text-xs uppercase tracking-[0.22em] text-primary">Фильтры</p>
-          <h3 className="mt-2 text-2xl font-semibold text-foreground">{emptyStates.filteredOut.title}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">{emptyStates.filteredOut.description}</p>
-          <div className="mt-4 flex justify-center">
-            <button
-              type="button"
-              className="rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:border-primary/40 hover:text-primary"
-              onClick={handleReset}
-            >
-              Сбросить фильтры
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {showNoContent ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/70 p-8 text-center shadow-inner shadow-black/5">
-          <p className="text-xs uppercase tracking-[0.22em] text-primary">Провайдеры</p>
-          <h3 className="mt-2 text-2xl font-semibold text-foreground">{emptyStates.noContent.title}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">{emptyStates.noContent.description}</p>
-          <div className="mt-4 flex justify-center">
-            <button
-              type="button"
-              className="rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:border-primary/40 hover:text-primary"
-              onClick={() => router.refresh()}
-            >
-              Повторить
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {!showNoInterests && sortedItems.length > 0 ? (
+      {!interestsError && sortedItems.length > 0 && (
         <ContentGrid items={sortedItems} activeType={activeType} debugEnabled={debugEnabled} />
-      ) : null}
+      )}
 
-      {debugEnabled && debug ? <DebugPanel debug={debug} /> : null}
+      {debugEnabled && debug ? (
+        <details className="rounded-2xl border border-dashed border-border bg-muted/40 p-4 text-sm">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+            Debug
+          </summary>
+          <pre className="mt-3 overflow-auto text-xs">
+            {JSON.stringify(debug, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </div>
   );
 };
