@@ -89,12 +89,19 @@ const questions: PersonalityQuestion[] = [
   },
 ];
 
+const normalizeAnswer = (value: number | null | undefined): number | null => {
+  if (typeof value !== "number") return null;
+  if (!Number.isInteger(value)) return null;
+  if (value < 1 || value > 4) return null;
+  return value;
+};
+
 const createInitialAnswers = (initialAnswers?: PersonalityAnswerFields | null): PersonalityAnswerFields => ({
-  q1: initialAnswers?.q1 ?? null,
-  q2: initialAnswers?.q2 ?? null,
-  q3: initialAnswers?.q3 ?? null,
-  q4: initialAnswers?.q4 ?? null,
-  q5: initialAnswers?.q5 ?? null,
+  q1: normalizeAnswer(initialAnswers?.q1),
+  q2: normalizeAnswer(initialAnswers?.q2),
+  q3: normalizeAnswer(initialAnswers?.q3),
+  q4: normalizeAnswer(initialAnswers?.q4),
+  q5: normalizeAnswer(initialAnswers?.q5),
 });
 
 const findFirstIncompleteQuestion = (answers: PersonalityAnswerFields): number => {
@@ -112,9 +119,13 @@ export const PersonalityQuiz = ({
   returnLabel = "Вернуться в профиль",
 }: PersonalityQuizProps) => {
   const router = useRouter();
-  const [answers, setAnswers] = useState<PersonalityAnswerFields>(() => createInitialAnswers(initialAnswers));
+  const sanitizedInitialAnswers = useMemo(
+    () => createInitialAnswers(initialAnswers),
+    [initialAnswers],
+  );
+  const [answers, setAnswers] = useState<PersonalityAnswerFields>(sanitizedInitialAnswers);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(() =>
-    findFirstIncompleteQuestion(createInitialAnswers(initialAnswers)),
+    findFirstIncompleteQuestion(sanitizedInitialAnswers),
   );
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -129,6 +140,11 @@ export const PersonalityQuiz = ({
     () => questions.every((question) => answers[question.id] !== null),
     [answers],
   );
+
+  useEffect(() => {
+    setAnswers(sanitizedInitialAnswers);
+    setCurrentQuestionIndex(findFirstIncompleteQuestion(sanitizedInitialAnswers));
+  }, [sanitizedInitialAnswers]);
 
   useEffect(() => {
     if (!hasValidOptionCount) {
