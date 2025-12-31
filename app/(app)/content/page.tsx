@@ -29,7 +29,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   const interestsParam = parseIds(searchParams?.interests);
   const idsFromQuery = idsParam.length > 0 ? idsParam : interestsParam;
 
-  const providerIds: ContentProviderId[] = ["youtube"];
+  const providerIds: ContentProviderId[] = ["youtube", "books"];
   let interestIds: string[] = [];
   let interestsError: string | null = null;
 
