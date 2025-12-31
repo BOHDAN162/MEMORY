@@ -1,6 +1,8 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getOrCreateUserProfile } from "@/lib/server/user-profile";
+import type { User } from "@supabase/supabase-js";
 import type { Interest, ServiceResponse } from "@/lib/types/interests";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -9,24 +11,16 @@ const normalizeInterestIds = (interestIds: string[]) =>
 
 export const getUserIdByAuthUserId = async (
   supabase: SupabaseClient,
-  authUserId: string,
+  authUser: User,
 ): Promise<ServiceResponse<string>> => {
-  if (!authUserId) {
-    return { data: null, error: "Auth user ID is required." };
+  if (!authUser?.id) {
+    return { data: null, error: "Auth user is required." };
   }
 
-  const { data, error } = await supabase
-    .from("users")
-    .upsert({ auth_user_id: authUserId }, { onConflict: "auth_user_id" })
-    .select("id")
-    .maybeSingle();
+  const { data, error } = await getOrCreateUserProfile(supabase, authUser);
 
-  if (error) {
-    return { data: null, error: error.message };
-  }
-
-  if (!data) {
-    return { data: null, error: "Unable to ensure user profile." };
+  if (error || !data) {
+    return { data: null, error: error ?? "Unable to ensure user profile." };
   }
 
   return { data: data.id, error: null };
@@ -114,7 +108,7 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
 
   const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
     supabase,
-    userData.user.id,
+    userData.user,
   );
 
   if (userIdError || !userId) {
@@ -161,13 +155,7 @@ export const getCurrentUserInterests = async (): Promise<ServiceResponse<Interes
   return { data: interests, error: null };
 };
 
-export const getUserInterests = async (
-  authUserId: string,
-): Promise<ServiceResponse<string[]>> => {
-  if (!authUserId) {
-    return { data: null, error: "User ID is required to fetch interests." };
-  }
-
+export const getUserInterests = async (): Promise<ServiceResponse<string[]>> => {
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {
@@ -177,19 +165,25 @@ export const getUserInterests = async (
     };
   }
 
-  const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
+  const { data: userData, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !userData?.user) {
+    return { data: null, error: authError?.message ?? "Not authenticated" };
+  }
+
+  const { data: profileId, error: profileError } = await getUserIdByAuthUserId(
     supabase,
-    authUserId,
+    userData.user,
   );
 
-  if (userIdError || !userId) {
-    return { data: null, error: userIdError ?? "Unable to ensure user profile." };
+  if (profileError || !profileId) {
+    return { data: null, error: profileError ?? "Unable to ensure user profile." };
   }
 
   const { data, error } = await supabase
     .from("user_interests")
     .select("interest_id")
-    .eq("user_id", userId);
+    .eq("user_id", profileId);
 
   if (error) {
     return { data: null, error: error.message };
@@ -238,7 +232,7 @@ export const setCurrentUserInterests = async (
 
   const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
     supabase,
-    userData.user.id,
+    userData.user,
   );
 
   if (userIdError || !userId) {
