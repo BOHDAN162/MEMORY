@@ -5,4 +5,4 @@ export type {
   PersonalityType,
   PersonalityTypeId,
 } from "./personality";
-export type { MapInterestNode } from "./map";
+export type { MapInterestNode, MapManualEdge } from "./map";
