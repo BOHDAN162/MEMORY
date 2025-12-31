@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 type AuthPageProps = {
   searchParams?: {
     returnUrl?: string;
+    status?: string;
   };
 };
 
@@ -46,6 +47,10 @@ const AuthPage = async ({ searchParams }: AuthPageProps) => {
   const credentials = getSupabaseCredentials();
   const hasCredentials = Boolean(credentials);
 
+  const statusMessage = searchParams?.status === "password-reset-success"
+    ? "Пароль обновлён, войдите"
+    : null;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10 text-foreground transition-colors duration-300">
       <div className="w-full max-w-xl space-y-6 rounded-2xl border border-border bg-card/90 p-6 shadow-[0_28px_80px_-45px_rgba(0,0,0,0.55)] backdrop-blur-xl">
@@ -64,6 +69,8 @@ const AuthPage = async ({ searchParams }: AuthPageProps) => {
             Добавьте их в .env.local, чтобы авторизация заработала.
           </div>
         ) : null}
+
+        {statusMessage ? <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{statusMessage}</p> : null}
 
         <AuthForm hasCredentials={hasCredentials} returnUrl={returnUrl} />
 
