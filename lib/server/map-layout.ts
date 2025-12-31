@@ -2,6 +2,7 @@ import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getUserIdByAuthUserId } from "@/lib/server/interests";
+import { getMapLayoutForUser } from "@/lib/supabase/map-layout";
 import type { MapInterestNode, ServiceResponse } from "@/lib/types";
 
 export const getCurrentUserMapNodes = async (): Promise<
@@ -40,24 +41,6 @@ export const getCurrentUserMapNodes = async (): Promise<
     return { data: null, error: interestError.message };
   }
 
-  const { data: layoutRows, error: layoutError } = await supabase
-    .from("map_layout")
-    .select("interest_id, x, y")
-    .eq("user_id", userId);
-
-  if (layoutError) {
-    return { data: null, error: layoutError.message };
-  }
-
-  const layoutMap = new Map(
-    (layoutRows ?? [])
-      .filter((row) => typeof row.interest_id === "string")
-      .map((row) => [
-        row.interest_id as string,
-        row.x != null && row.y != null ? { x: row.x, y: row.y } : null,
-      ]),
-  );
-
   type InterestRow = {
     interest?:
       | {
@@ -74,6 +57,28 @@ export const getCurrentUserMapNodes = async (): Promise<
         }>
       | null;
   };
+
+  const { data: layoutRows, error: layoutError } = await getMapLayoutForUser(
+    supabase,
+    userId,
+    interestRows?.map((row) => (row as InterestRow).interest)?.flatMap((interest) => {
+      if (!interest) return [];
+      return Array.isArray(interest) ? interest.map((item) => item.id) : [interest.id];
+    }) ?? [],
+  );
+
+  if (layoutError) {
+    return { data: null, error: layoutError.message };
+  }
+
+  const layoutMap = new Map(
+    (layoutRows ?? [])
+      .filter((row) => typeof row.interest_id === "string")
+      .map((row) => [
+        row.interest_id as string,
+        row.x != null && row.y != null ? { x: row.x, y: row.y } : null,
+      ]),
+  );
 
   const mapNodes: MapInterestNode[] =
     interestRows
