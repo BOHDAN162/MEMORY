@@ -5,3 +5,18 @@ export type PersonalityAnswerFields = {
   q4: number | null;
   q5: number | null;
 };
+
+export type PersonalityTypeId =
+  | "strategist"
+  | "practitioner"
+  | "explorer"
+  | "creator"
+  | "communicator"
+  | "generalist";
+
+export type PersonalityType = {
+  typeId: PersonalityTypeId;
+  title: string;
+  slogan: string;
+  strengths: string[];
+};

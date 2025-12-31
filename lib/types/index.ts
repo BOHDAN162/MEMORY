@@ -1,3 +1,7 @@
 export type Nullable<T> = T | null;
 export type { Interest, ServiceResponse } from "./interests";
-export type { PersonalityAnswerFields } from "./personality";
+export type {
+  PersonalityAnswerFields,
+  PersonalityType,
+  PersonalityTypeId,
+} from "./personality";
