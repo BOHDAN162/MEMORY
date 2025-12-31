@@ -1,7 +1,7 @@
 export type PersonalityAnswerFields = {
-  q1: string;
-  q2: string;
-  q3: string;
-  q4: string;
-  q5: string;
+  q1: number | null;
+  q2: number | null;
+  q3: number | null;
+  q4: number | null;
+  q5: number | null;
 };
