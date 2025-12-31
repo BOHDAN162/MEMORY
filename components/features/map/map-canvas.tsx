@@ -6,14 +6,27 @@ import { createManualEdgeAction } from "@/app/actions/create-manual-edge";
 import { deleteManualEdgeAction } from "@/app/actions/delete-manual-edge";
 import { saveMapPosition } from "@/app/actions/save-map-position";
 import { saveMapPositions } from "@/app/actions/save-map-positions";
-import { Button } from "@/components/ui/button";
+import { InterestNode } from "@/components/features/map/interest-node";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { clusterKey, computeClusterLayout, placeMissingNodesNearClusters } from "@/lib/map/auto-layout";
 import type { MapInterestNode, MapManualEdge } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import Link from "next/link";
+import { CircleHelp, Hand, Maximize2, MousePointer2, RefreshCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   Background,
-  Controls,
+  BackgroundVariant,
   MiniMap,
   Panel,
   ReactFlow,
@@ -24,7 +37,6 @@ import {
   type Edge,
   type OnEdgesChange,
   type Node,
-  type NodeProps,
   type OnNodesChange,
   type OnNodeDrag,
 } from "@xyflow/react";
@@ -33,6 +45,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 type InterestNodeData = {
   title: string;
   cluster: string | null;
+  clusterLabel: string;
+  isActive?: boolean;
+  isSelected?: boolean;
+  isMultiSelected?: boolean;
+  isDragging?: boolean;
 };
 
 type MapCanvasProps = {
@@ -42,25 +59,25 @@ type MapCanvasProps = {
 
 type InterestFlowNode = Node<InterestNodeData>;
 
-const InterestNodeCard = ({ data, selected }: NodeProps<InterestFlowNode>) => {
-  return (
-    <div
-      className={cn(
-        "min-w-[180px] rounded-2xl border border-border/70 bg-card/90 px-4 py-3 text-left shadow-lg shadow-black/20 ring-1 ring-inset ring-primary/10 backdrop-blur transition",
-        selected
-          ? "scale-[1.01] border-primary/60 shadow-primary/30 ring-2 ring-primary/60"
-          : "hover:border-primary/40 hover:ring-primary/20",
-      )}
-    >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
-        {clusterKey(data.cluster)}
+const EmptyMapState = () => (
+  <div className="flex h-[60vh] min-h-[360px] w-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 text-center shadow-inner shadow-black/5">
+    <div className="max-w-md space-y-3">
+      <p className="text-sm font-semibold text-foreground">Интересы не выбраны</p>
+      <p className="text-sm text-muted-foreground">
+        Добавьте темы в разделе &laquo;Контент&raquo; или пройдите персонализацию, чтобы построить карту.
       </p>
-      <p className="text-sm font-semibold leading-snug text-foreground">{data.title}</p>
+      <div className="flex items-center justify-center gap-2">
+        <Link className={buttonVariants({ variant: "primary", size: "sm" })} href="/onboarding">
+          Выбрать интересы
+        </Link>
+        <Link className={buttonVariants({ variant: "soft", size: "sm" })} href="/content">
+          К контенту
+        </Link>
+      </div>
     </div>
-  );
-};
-
-const nodeTypes = { interest: InterestNodeCard };
+  </div>
+);
+const nodeTypes = { interest: InterestNode };
 
 type ManualEdgeState = {
   sourceId: string;
@@ -84,14 +101,20 @@ const autoEdgeId = (cluster: string, a: string, b: string) => {
   return `a:${cluster}:${source}-${target}`;
 };
 
+const EDGE_TRANSITION = "stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease";
+
 const AUTO_EDGE_STYLE = {
-  stroke: "rgba(255,255,255,0.32)",
-  strokeWidth: 1.6,
+  stroke: "hsl(var(--foreground) / 0.22)",
+  strokeWidth: 1.35,
+  opacity: 0.65,
+  transition: EDGE_TRANSITION,
 };
 
 const MANUAL_EDGE_STYLE = {
-  stroke: "rgba(124,58,237,0.95)",
-  strokeWidth: 2.3,
+  stroke: "hsl(var(--primary) / 0.85)",
+  strokeWidth: 1.8,
+  opacity: 0.75,
+  transition: EDGE_TRANSITION,
 };
 
 const toManualEdgeState = (edges: MapManualEdge[]): ManualEdgeState[] => {
@@ -113,11 +136,6 @@ const buildManualEdge = (edge: ManualEdgeState): Edge => ({
   target: edge.targetId,
   type: "smoothstep",
   animated: false,
-  label: "•",
-  labelStyle: {
-    fontSize: 10,
-    color: "hsl(var(--primary))",
-  },
   style: MANUAL_EDGE_STYLE,
   data: { kind: "manual" },
 });
@@ -236,6 +254,7 @@ const buildLayout = (interests: MapInterestNode[]) => {
     data: {
       title: interest.title,
       cluster: interest.cluster,
+      clusterLabel: clusterKey(interest.cluster),
     },
   }));
 
@@ -282,7 +301,23 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectionHint, setSelectionHint] = useState<string | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [isResettingLayout, setIsResettingLayout] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const router = useRouter();
+  const selectedInterestIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const selectedInterestIdsSorted = useMemo(
+    () => [...selectedInterestIds].sort(),
+    [selectedInterestIds],
+  );
+  const hasSelection = selectedInterestIdsSorted.length > 0;
+  const highlightNodeIds = useMemo(() => {
+    const set = new Set(selectedInterestIds);
+    if (activeNodeId) set.add(activeNodeId);
+    if (connectFromId) set.add(connectFromId);
+    return set;
+  }, [activeNodeId, connectFromId, selectedInterestIds]);
 
   useEffect(() => {
     if (!shouldFitView || hasFittedRef.current || nodes.length === 0) return;
@@ -299,6 +334,37 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     );
     setEdges(merged);
   }, [autoEdges, manualEdgesState, selectedEdgeId, setEdges]);
+
+  const styledEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        const isManual = edge.data?.kind === "manual";
+        const isConnected =
+          highlightNodeIds.has(edge.source) || highlightNodeIds.has(edge.target);
+        const isEdgeSelected = edge.id === selectedEdgeId;
+        const hasHighlight = highlightNodeIds.size > 0;
+        const baseStyle = isManual ? MANUAL_EDGE_STYLE : AUTO_EDGE_STYLE;
+        const emphasized = isConnected || isEdgeSelected;
+        const strokeWidth = emphasized ? (isManual ? 2.4 : 2) : baseStyle.strokeWidth;
+        const opacity = emphasized ? 0.95 : hasHighlight ? 0.35 : baseStyle.opacity;
+        const stroke = emphasized
+          ? `hsl(var(--primary) / ${isManual ? 0.95 : 0.75})`
+          : baseStyle.stroke;
+
+        return {
+          ...edge,
+          type: "smoothstep",
+          animated: false,
+          style: {
+            ...baseStyle,
+            strokeWidth,
+            opacity,
+            stroke,
+          },
+        };
+      }),
+    [edges, highlightNodeIds, selectedEdgeId],
+  );
 
   const autoSavePayload = useMemo(
     () =>
@@ -348,6 +414,18 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setSelectedEdgeId(selected?.id ?? null);
   }, []);
 
+  const handlePaneMouseLeave = useCallback(() => {
+    setActiveNodeId(null);
+  }, []);
+
+  const handleNodeMouseEnter = useCallback((_: ReactMouseEvent, node: InterestFlowNode) => {
+    setActiveNodeId(node.id);
+  }, []);
+
+  const handleNodeMouseLeave = useCallback(() => {
+    setActiveNodeId(null);
+  }, []);
+
   const selectSingle = useCallback((id: string) => setSelectedIds(new Set([id])), []);
 
   const toggleSelect = useCallback((id: string) => {
@@ -366,18 +444,20 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setSelectedIds(new Set());
   }, []);
 
-  const selectedInterestIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
-  const selectedInterestIdsSorted = useMemo(
-    () => [...selectedInterestIds].sort(),
-    [selectedInterestIds],
-  );
-  const hasSelection = selectedInterestIdsSorted.length > 0;
-
-  const isSelected = useCallback(
-    (id: string) => {
-      return selectedIds.has(id);
-    },
-    [selectedIds],
+  const displayedNodes = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        selected: selectedIds.has(node.id),
+        data: {
+          ...node.data,
+          isActive: activeNodeId === node.id,
+          isSelected: selectedIds.has(node.id),
+          isMultiSelected: selectedIds.size > 1 && selectedIds.has(node.id),
+          isDragging: draggingNodeId === node.id,
+        },
+      })),
+    [activeNodeId, draggingNodeId, nodes, selectedIds],
   );
 
   const persistPosition = useCallback(
@@ -416,15 +496,21 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
 
   const handleNodeDragStop: OnNodeDrag<InterestFlowNode> = useCallback(
     (_, node) => {
+      setDraggingNodeId(null);
       if (!node?.id || !node.position) return;
 
       const previous = lastSavedPositions.get(node.id);
       if (!hasPositionChanged(previous, node.position)) return;
 
       void persistPosition(node.id, node.position);
+      setDraggingNodeId(null);
     },
     [lastSavedPositions, persistPosition],
   );
+  const handleNodeDragStart: OnNodeDrag<InterestFlowNode> = useCallback((_, node) => {
+    if (!node?.id) return;
+    setDraggingNodeId(node.id);
+  }, []);
 
   const nodeTitleMap = useMemo(
     () => new Map(interests.map((interest) => [interest.id, interest.title])),
@@ -542,6 +628,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     if (connectMode) return;
     clearSelection();
     setSelectedEdgeId(null);
+    setActiveNodeId(null);
   }, [clearSelection, connectMode]);
 
   const handlePickSelected = useCallback(() => {
@@ -584,14 +671,65 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setEdgePendingKey(null);
   }, [edges, selectedEdgeId]);
 
-  useEffect(() => {
+  const handleResetLayout = useCallback(async () => {
+    setResetDialogOpen(false);
+    setIsResettingLayout(true);
+    setSelectionHint(null);
+    setConnectFromId(null);
+    setConnectMode(false);
+    setSelectionMode(false);
+    setActiveNodeId(null);
+    setDraggingNodeId(null);
+    setSelectedIds(new Set());
+
+    const nextLayout = computeClusterLayout(interests);
+    const payload = Array.from(nextLayout.entries()).map(([interestId, position]) => ({
+      interestId,
+      x: position.x,
+      y: position.y,
+    }));
+
     setNodes((currentNodes) =>
-      currentNodes.map((node) => ({
-        ...node,
-        selected: isSelected(node.id),
-      })),
+      currentNodes.map((node) => {
+        const nextPosition = nextLayout.get(node.id);
+        if (!nextPosition) return node;
+        return {
+          ...node,
+          position: nextPosition,
+        };
+      }),
     );
-  }, [isSelected, setNodes, selectedIds]);
+    setLastSavedPositions(new Map(nextLayout));
+    hasFittedRef.current = false;
+
+    try {
+      if (payload.length > 0) {
+        await saveMapPositions({ positions: payload });
+      }
+      setToast({ message: "Раскладка сброшена", variant: "success" });
+      setTimeout(() => {
+        reactFlow.fitView({ padding: 0.2, duration: 400 });
+      }, 80);
+    } catch {
+      setToast({ message: "Не удалось сбросить раскладку", variant: "error" });
+    } finally {
+      setIsResettingLayout(false);
+    }
+  }, [interests, reactFlow, setNodes]);
+
+  const handleZoomIn = useCallback(() => {
+    const current = reactFlow.getZoom();
+    reactFlow.zoomTo(current + 0.2, { duration: 200 });
+  }, [reactFlow]);
+
+  const handleZoomOut = useCallback(() => {
+    const current = reactFlow.getZoom();
+    reactFlow.zoomTo(Math.max(0.4, current - 0.2), { duration: 200 });
+  }, [reactFlow]);
+
+  const handleFitView = useCallback(() => {
+    reactFlow.fitView({ padding: 0.22, duration: 320 });
+  }, [reactFlow]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -649,8 +787,8 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     : "Нажмите «Соединить», чтобы добавить ручные связи.";
 
   const selectionStatus = selectionMode
-    ? "Режим выбора: тапните или кликните, чтобы добавить/убрать из множества."
-    : "Для множественного выбора используйте Ctrl/⌘/Shift или включите «Выбор».";
+    ? "Режим выбора включен: тапайте или кликайте, чтобы отметить несколько узлов."
+    : "Клик — выбрать. Shift/Ctrl — мульти. На мобильном включите «Выбор».";
   const selectionHelperText = hasSelection
     ? "Используем только отмеченные узлы."
     : "Выберите хотя бы один интерес.";
@@ -660,167 +798,255 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
       ? "Сохраняем позицию..."
       : newlyPositionedIds.length > 0 && isSaving
         ? "Формируем авто-раскладку..."
-        : "Перетаскивайте узлы свободно";
+        : "Перетаскивайте узлы — раскладка сохранится автоматически";
 
   const edgeStatus = edgePendingKey ? "Сохраняем связь..." : positionStatus;
 
   if (interests.length === 0) {
-    return (
-      <div className="flex h-[60vh] min-h-[360px] w-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 text-center shadow-inner shadow-black/5">
-        <div className="max-w-md space-y-2">
-          <p className="text-sm font-semibold text-foreground">Интересы не выбраны</p>
-          <p className="text-sm text-muted-foreground">
-            Добавьте темы в разделе &laquo;Контент&raquo;, чтобы построить карту.
-          </p>
-        </div>
-      </div>
-    );
+    return <EmptyMapState />;
   }
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)]">
-      <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 sm:inset-auto sm:right-3 sm:top-3 sm:w-[320px]">
-        <div className="pointer-events-auto flex flex-col gap-2 rounded-2xl border border-border/80 bg-background/95 px-4 py-3 shadow-lg shadow-black/10 backdrop-blur">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
-            Подбор контента
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="primary"
-            className="w-full justify-center"
-            disabled={!hasSelection}
-            onClick={handlePickSelected}
-          >
-            {hasSelection
-              ? `Подобрать по выбранным (${selectedInterestIdsSorted.length})`
-              : "Подобрать по выбранным"}
-          </Button>
-          <p className="text-xs text-muted-foreground">{selectionHelperText}</p>
-          <Button
-            type="button"
-            size="sm"
-            variant="soft"
-            className="w-full justify-center border border-border/60"
-            onClick={handlePickAll}
-          >
-            Подобрать по всем
-          </Button>
-          <p className="text-[11px] text-muted-foreground">
-            Выбранные интересы передадутся в /content в виде параметров запроса.
-          </p>
-        </div>
-      </div>
-      <ReactFlowProvider>
-        <div className="h-[70vh] min-h-[460px] w-full">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            minZoom={0.4}
-            maxZoom={1.6}
-            nodeTypes={nodeTypes}
-            panOnScroll
-            selectionOnDrag={false}
-            panOnDrag
-            deleteKeyCode={null}
-            onNodesChange={handleNodesChange}
-            onEdgesChange={handleEdgesChange}
-            onNodeDragStop={handleNodeDragStop}
-            onNodeClick={handleNodeClick}
-            onSelectionChange={handleSelectionChange}
-            onPaneClick={handlePaneClick}
-            className={cn("bg-gradient-to-b from-background to-background/60")}
-          >
-            <Background gap={18} size={1.5} color="rgba(255,255,255,0.08)" />
-            <MiniMap
-              className="!bg-card/80 !text-muted-foreground"
-              nodeColor="rgba(124, 58, 237, 0.8)"
-              nodeBorderRadius={12}
-              pannable
-              zoomable
-            />
-            <Controls className="!bg-card !border-border !text-foreground" position="bottom-left" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_35%_20%,rgba(124,58,237,0.12),transparent_45%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_70%,rgba(79,70,229,0.08),transparent_50%)]" />
+      <div className="h-[70vh] min-h-[480px] w-full">
+        <ReactFlow
+          nodes={displayedNodes}
+          edges={styledEdges}
+          minZoom={0.4}
+          maxZoom={1.6}
+          nodeTypes={nodeTypes}
+          panOnScroll
+          selectionOnDrag={selectionMode}
+          panOnDrag={!selectionMode}
+          deleteKeyCode={null}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onNodeDragStart={handleNodeDragStart}
+          onNodeDragStop={handleNodeDragStop}
+          onNodeClick={handleNodeClick}
+          onSelectionChange={handleSelectionChange}
+          onPaneClick={handlePaneClick}
+          onPaneMouseLeave={handlePaneMouseLeave}
+          onNodeMouseEnter={handleNodeMouseEnter}
+          onNodeMouseLeave={handleNodeMouseLeave}
+          className={cn("bg-gradient-to-b from-background via-background/92 to-background/80")}
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1.4}
+            color="rgba(255,255,255,0.06)"
+          />
+          <MiniMap
+            className="!bg-card/85 !text-muted-foreground"
+            nodeColor="rgba(124, 58, 237, 0.82)"
+            nodeBorderRadius={14}
+            pannable
+            zoomable
+            position="bottom-right"
+          />
+
+            <Panel
+              position="top-right"
+              className="max-w-[min(380px,calc(100vw-24px))] rounded-2xl border border-border/80 bg-background/95 px-4 py-3 shadow-xl shadow-black/15 backdrop-blur"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
+                    Подбор контента
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Отметьте интересы или используйте все сразу — откроется /content.
+                  </p>
+                </div>
+                <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
+                  {hasSelection ? `Выбрано ${selectedInterestIdsSorted.length}` : "Нет выбора"}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  className="w-full justify-center"
+                  disabled={!hasSelection}
+                  onClick={handlePickSelected}
+                >
+                  {hasSelection
+                    ? `Подобрать по выбранным (${selectedInterestIdsSorted.length})`
+                    : "Подобрать по выбранным"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="soft"
+                  className="w-full justify-center border border-border/60"
+                  onClick={handlePickAll}
+                >
+                  Подобрать по всем
+                </Button>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{selectionHelperText}</p>
+            </Panel>
+
             <Panel
               position="top-left"
-              className="rounded-xl bg-background/90 px-3 py-2 text-xs shadow-lg shadow-black/10 ring-1 ring-border"
+              className="max-w-[min(420px,calc(100vw-24px))] rounded-2xl border border-border/80 bg-background/95 px-4 py-3 text-xs shadow-xl shadow-black/15 backdrop-blur"
             >
-              <div className="flex items-center gap-2">
-                <button
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
                   type="button"
-                  onClick={handleConnectToggle}
+                  size="sm"
+                  variant={connectMode ? "primary" : "soft"}
+                  className={cn(
+                    "h-9 rounded-full px-3",
+                    edgePendingKey && "cursor-not-allowed opacity-60",
+                  )}
                   disabled={Boolean(edgePendingKey)}
-                  aria-pressed={connectMode}
-                  className={cn(
-                    "rounded-full border px-3 py-1 font-semibold transition",
-                    edgePendingKey
-                      ? "cursor-not-allowed border-border/70 bg-muted text-muted-foreground"
-                      : connectMode
-                        ? "border-primary/70 bg-primary/90 text-primary-foreground shadow-sm shadow-primary/30"
-                        : "border-border bg-card text-foreground hover:border-primary/40 hover:text-primary",
-                  )}
+                  onClick={handleConnectToggle}
                 >
-                  Соединить
-                </button>
-                <button
+                  <MousePointer2 className="h-4 w-4" aria-hidden />
+                  <span className="hidden sm:inline">Соединить</span>
+                </Button>
+                <Button
                   type="button"
-                  onClick={handleSelectionModeToggle}
-                  disabled={connectMode}
-                  aria-pressed={selectionMode}
+                  size="sm"
+                  variant="soft"
                   className={cn(
-                    "rounded-full border px-3 py-1 font-semibold transition",
-                    connectMode
-                      ? "cursor-not-allowed border-border/70 bg-muted text-muted-foreground"
-                      : selectionMode
-                        ? "border-primary/70 bg-primary/90 text-primary-foreground shadow-sm shadow-primary/30"
-                        : "border-border bg-card text-foreground hover:border-primary/40 hover:text-primary",
+                    "h-9 rounded-full px-3",
+                    (!canDeleteSelected || edgePendingKey) && "cursor-not-allowed opacity-60",
+                    canDeleteSelected && !edgePendingKey && "text-destructive",
                   )}
-                >
-                  Выбор
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteManualEdge()}
                   disabled={!canDeleteSelected || Boolean(edgePendingKey)}
-                  className={cn(
-                    "rounded-full border px-3 py-1 font-semibold transition",
-                    !canDeleteSelected || edgePendingKey
-                      ? "cursor-not-allowed border-border/70 bg-muted text-muted-foreground"
-                      : "border-border bg-card text-foreground hover:border-destructive/50 hover:text-destructive",
-                  )}
+                  onClick={() => void handleDeleteManualEdge()}
                 >
-                  Удалить связь
-                </button>
+                  <RefreshCcw className="h-4 w-4 rotate-45" aria-hidden />
+                  <span className="hidden sm:inline">Удалить связь</span>
+                </Button>
+                <div className="flex items-center gap-2 rounded-full border border-border/70 bg-card/70 px-3 py-1.5 text-[11px] shadow-inner shadow-black/5">
+                  <span className="font-semibold text-foreground">Выбрано: {selectedInterestIds.length}</span>
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    disabled={selectedInterestIds.length === 0}
+                    className={cn(
+                      "rounded-full px-2 py-1 font-semibold transition",
+                      selectedInterestIds.length === 0
+                        ? "cursor-not-allowed bg-muted text-muted-foreground"
+                        : "bg-primary/10 text-primary hover:bg-primary/20",
+                    )}
+                  >
+                    Сбросить
+                  </button>
+                </div>
               </div>
-              <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-muted-foreground">
+              <div className="mt-3 grid gap-1 text-[11px] leading-relaxed text-muted-foreground">
                 <p className="text-foreground/80">{connectHint}</p>
                 <p className="text-foreground/80">{selectionStatus}</p>
                 <p>{edgeStatus}</p>
                 {edgeError ? <p className="text-destructive">{edgeError}</p> : null}
                 {selectionHint ? <p className="text-primary">{selectionHint}</p> : null}
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-full border border-border/80 bg-card/70 px-3 py-2 text-[11px] text-foreground shadow-inner shadow-black/5">
-                <span className="font-semibold">Выбрано: {selectedInterestIds.length}</span>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  disabled={selectedInterestIds.length === 0}
-                  className={cn(
-                    "rounded-full px-2 py-1 font-semibold",
-                    selectedInterestIds.length === 0
-                      ? "cursor-not-allowed bg-muted text-muted-foreground"
-                      : "bg-primary/10 text-primary hover:bg-primary/20",
-                  )}
-                >
-                  Сбросить
-                </button>
-                <span className="text-[11px] text-muted-foreground">
-                  Подбор контента — используйте панель справа.
-                </span>
+              <div className="mt-3 grid gap-1 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-2 font-semibold text-foreground">
+                  <CircleHelp className="h-3.5 w-3.5 text-primary" aria-hidden />
+                  <span>Быстрые подсказки</span>
+                </div>
+                <p>Клик — выбрать. Shift/Ctrl — мульти.</p>
+                <p>Перетяни узел — позиция сохранится. Фит-вью внизу слева.</p>
+                <p>На мобильном включи «Режим выбора», чтобы отметить несколько.</p>
               </div>
             </Panel>
-          </ReactFlow>
-        </div>
-      </ReactFlowProvider>
+
+          <Panel
+            position="bottom-left"
+            className="rounded-full border border-border/80 bg-background/95 px-2 py-1 shadow-lg shadow-black/10 backdrop-blur"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="soft"
+                className="h-9 rounded-full px-3"
+                onClick={handleZoomIn}
+              >
+                <ZoomIn className="h-4 w-4" aria-hidden />
+                <span className="hidden sm:inline">Приблизить</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="soft"
+                className="h-9 rounded-full px-3"
+                onClick={handleZoomOut}
+              >
+                <ZoomOut className="h-4 w-4" aria-hidden />
+                <span className="hidden sm:inline">Отдалить</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="soft"
+                className="h-9 rounded-full px-3"
+                onClick={handleFitView}
+              >
+                <Maximize2 className="h-4 w-4" aria-hidden />
+                <span className="hidden sm:inline">Подогнать</span>
+              </Button>
+              <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="soft"
+                    className="h-9 rounded-full px-3 text-destructive"
+                    disabled={isResettingLayout}
+                  >
+                    <RefreshCcw className="h-4 w-4" aria-hidden />
+                    <span className="hidden sm:inline">Сбросить</span>
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Сбросить раскладку?</DialogTitle>
+                    <DialogDescription>
+                      Мы вернём узлы в аккуратную авто-раскладку и сохраним новое расположение. Ручные связи останутся.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button type="button" variant="soft" size="sm">
+                        Отмена
+                      </Button>
+                    </DialogClose>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={() => void handleResetLayout()}
+                      disabled={isResettingLayout}
+                    >
+                      {isResettingLayout ? "Сбрасываем..." : "Сбросить"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Button
+                type="button"
+                size="sm"
+                variant={selectionMode ? "primary" : "soft"}
+                className="h-9 rounded-full px-3"
+                onClick={handleSelectionModeToggle}
+              >
+                <Hand className="h-4 w-4" aria-hidden />
+                <span className="hidden sm:inline">Режим выбора</span>
+              </Button>
+            </div>
+          </Panel>
+        </ReactFlow>
+      </div>
       {saveError ? (
         <div className="absolute inset-x-0 bottom-0 bg-destructive/90 px-4 py-2 text-center text-sm font-semibold text-destructive-foreground">
           Не удалось сохранить позицию: {saveError}
@@ -853,23 +1079,12 @@ export const MapCanvas = ({ interests, manualEdges }: MapCanvasProps) => {
   const layoutKey = `${layoutKeyBase}|${manualEdgesKey}`;
 
   if (interests.length === 0) {
-    return (
-      <div className="flex h-[60vh] min-h-[360px] w-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 text-center shadow-inner shadow-black/5">
-        <div className="max-w-md space-y-2">
-          <p className="text-sm font-semibold text-foreground">Интересы не выбраны</p>
-          <p className="text-sm text-muted-foreground">
-            Добавьте темы в разделе &laquo;Контент&raquo;, чтобы построить карту.
-          </p>
-        </div>
-      </div>
-    );
+    return <EmptyMapState />;
   }
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)]">
-      <ReactFlowProvider>
-        <MapCanvasInner key={layoutKey} interests={interests} manualEdges={manualEdges} />
-      </ReactFlowProvider>
-    </div>
+    <ReactFlowProvider>
+      <MapCanvasInner key={layoutKey} interests={interests} manualEdges={manualEdges} />
+    </ReactFlowProvider>
   );
 };
