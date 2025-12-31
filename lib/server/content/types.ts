@@ -31,5 +31,6 @@ export interface ProviderFetchResult {
 export interface ContentProvider {
   id: ContentProviderId;
   ttlSeconds: number;
+  getHashInput?: (req: ProviderRequest) => Promise<unknown> | unknown;
   fetch(req: ProviderRequest): Promise<ProviderFetchResult>;
 }

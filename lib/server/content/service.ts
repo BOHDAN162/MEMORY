@@ -66,7 +66,7 @@ export const getContent = async (
       locale: effectiveLocale,
     };
 
-    const hashInput =
+    const defaultHashInput =
       provider.id === "youtube"
         ? JSON.stringify({
             provider: "youtube",
@@ -81,6 +81,21 @@ export const getContent = async (
             limit: effectiveLimit ?? null,
             locale: effectiveLocale ?? null,
           };
+
+    let hashInput: object | string = defaultHashInput;
+
+    if (provider.getHashInput) {
+      try {
+        const customHashInput = await provider.getHashInput(request);
+        if (customHashInput) {
+          hashInput = customHashInput as object | string;
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV !== "production") {
+          console.error(`[content] provider ${provider.id} getHashInput failed`, error);
+        }
+      }
+    }
 
     const hash = stableHash(hashInput);
 
