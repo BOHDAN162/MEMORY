@@ -1,11 +1,16 @@
 "use server";
 
 import { getUserIdByAuthUserId } from "@/lib/server/interests";
+import { determinePersonalityType } from "@/lib/server/personality";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { PersonalityAnswerFields } from "@/lib/types/personality";
+import type { PersonalityAnswerFields, PersonalityTypeId } from "@/lib/types/personality";
 import { revalidatePath } from "next/cache";
 
-export type SavePersonalityAnswersResult = { error: string | null; message?: string };
+export type SavePersonalityAnswersResult = {
+  error: string | null;
+  message?: string;
+  personalityType?: PersonalityTypeId | null;
+};
 
 const questionIds: Array<keyof PersonalityAnswerFields> = ["q1", "q2", "q3", "q4", "q5"];
 
@@ -49,6 +54,18 @@ export const savePersonalityAnswers = async (
     return { error: "Заполните все вопросы перед сохранением." };
   }
 
+  let personalityType: PersonalityTypeId;
+
+  try {
+    personalityType = determinePersonalityType(answers);
+  } catch (error) {
+    return {
+      error: error instanceof Error
+        ? error.message
+        : "Не удалось определить тип личности. Попробуйте ещё раз.",
+    };
+  }
+
   const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
     supabase,
     authUser.user,
@@ -84,19 +101,23 @@ export const savePersonalityAnswers = async (
     return { error: "Что-то пошло не так. Попробуйте ещё раз." };
   }
 
-  const { error: personalityTypeError } = await supabase
-    .from("users")
-    .update({ personality_type: "pending" })
-    .eq("id", userId)
-    .is("personality_type", null);
+  try {
+    const { error: personalityTypeError } = await supabase
+      .from("users")
+      .update({ personality_type: personalityType })
+      .eq("id", userId);
 
-  if (personalityTypeError) {
-    return { error: personalityTypeError.message };
+    if (personalityTypeError) {
+      return { error: "Не удалось сохранить тип личности. Попробуйте ещё раз." };
+    }
+  } catch (error) {
+    console.error("Failed to update personality type", error);
+    return { error: "Не удалось сохранить тип личности. Попробуйте ещё раз." };
   }
 
   revalidatePath("/onboarding");
   revalidatePath("/profile");
   revalidatePath("/profile/personality");
 
-  return { error: null, message: "Сохранено" };
+  return { error: null, message: "Сохранено", personalityType };
 };
