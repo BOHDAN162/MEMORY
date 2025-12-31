@@ -1,5 +1,5 @@
 import { MapCanvas } from "@/components/features/map/map-canvas";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { getCurrentUserMapData } from "@/lib/server/map-layout";
 import Link from "next/link";
 
@@ -32,17 +32,13 @@ const MapPage = async () => {
           <p className="text-xs uppercase tracking-[0.25em] text-primary">Карта</p>
           <h2 className="text-xl font-semibold">Интерактивная карта интересов</h2>
           <p className="text-sm text-muted-foreground">
-            Узлы подтягиваются из выбранных интересов. Перетаскивайте элементы — позиции сохранятся.
+            Узлы подтягиваются из выбранных интересов. Перетаскивайте элементы — позиции сохранятся. В
+            панели карты можно выбрать интересы и перейти к подбору контента.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="soft" size="sm" disabled>
-            Подобрать контент по выбранным
-          </Button>
-          <Link className={buttonVariants({ variant: "primary", size: "sm" })} href="/content">
-            Открыть контент
-          </Link>
-        </div>
+        <Link className={buttonVariants({ variant: "primary", size: "sm" })} href="/content">
+          Открыть контент
+        </Link>
       </div>
 
       {error ? (
