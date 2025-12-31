@@ -9,6 +9,7 @@ type ContentPageProps = {
     ids?: string | string[];
     interests?: string | string[];
     mode?: string | string[];
+    debug?: string | string[];
   };
 };
 
@@ -28,6 +29,8 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   const idsParam = parseIds(searchParams?.ids);
   const interestsParam = parseIds(searchParams?.interests);
   const idsFromQuery = idsParam.length > 0 ? idsParam : interestsParam;
+  const debugParamRaw = searchParams?.debug;
+  const debugParam = Array.isArray(debugParamRaw) ? debugParamRaw[0] : debugParamRaw;
 
   const providerIds: ContentProviderId[] = ["youtube", "books"];
   let interestIds: string[] = [];
@@ -65,7 +68,8 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
     : null;
 
   const cards = contentResult?.items ?? [];
-  const debug = contentResult?.debug;
+  const debugEnabled = process.env.NODE_ENV !== "production" || debugParam === "1";
+  const debug = debugEnabled ? contentResult?.debug : null;
   const selectionDescription =
     selectionMode === "selected"
       ? "Режим: только выбранные интересы из параметра ids."

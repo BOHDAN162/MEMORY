@@ -1,10 +1,11 @@
-import type { ContentProvider } from "../types";
+import type { ContentProvider, ProviderFetchResult, ProviderRequest } from "../types";
 
 const articlesProvider: ContentProvider = {
   id: "articles",
   ttlSeconds: 60 * 60 * 12,
-  async fetch() {
-    return [];
+  async fetch(_req: ProviderRequest): Promise<ProviderFetchResult> {
+    void _req;
+    return { items: [], error: null };
   },
 };
 

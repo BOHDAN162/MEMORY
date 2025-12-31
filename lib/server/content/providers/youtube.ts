@@ -2,7 +2,12 @@ import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ContentItem, ContentProvider, ProviderRequest } from "../types";
+import type {
+  ContentItem,
+  ContentProvider,
+  ProviderFetchResult,
+  ProviderRequest,
+} from "../types";
 
 type InterestRow = {
   id: string;
@@ -191,20 +196,22 @@ const normalizeItem = (
 const youtubeProvider: ContentProvider = {
   id: "youtube",
   ttlSeconds: 60 * 60 * 12,
-  async fetch(req: ProviderRequest) {
+  async fetch(req: ProviderRequest): Promise<ProviderFetchResult> {
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
       if (process.env.NODE_ENV !== "production") {
         console.error("[youtube] Supabase client is not configured");
       }
-      return [];
+      return { items: [], error: "Supabase client is not configured" };
     }
 
     const interestIds = Array.from(new Set(req.interestIds.filter(Boolean)));
-    if (interestIds.length === 0) return [];
+    if (interestIds.length === 0) return { items: [], error: null };
 
     const interests = await fetchInterestRows(supabase, interestIds);
-    if (interests.length === 0) return [];
+    if (interests.length === 0) {
+      return { items: [], error: "Failed to load interests (RLS or query error)" };
+    }
 
     const totalLimit = Math.max(1, Math.min(req.limit ?? DEFAULT_TOTAL_LIMIT, DEFAULT_TOTAL_LIMIT));
     const perInterestLimit = Math.min(
@@ -251,7 +258,7 @@ const youtubeProvider: ContentProvider = {
       console.info("[youtube] returning items", { count: items.length });
     }
 
-    return items;
+    return { items, error: null };
   },
 };
 
