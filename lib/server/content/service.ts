@@ -25,6 +25,8 @@ export const getContent = async (
   const interestIdsSorted = Array.from(new Set(params.interestIds.filter(Boolean))).sort(
     (a, b) => a.localeCompare(b),
   );
+  const effectiveLimit = Math.max(1, Math.min(params.limit ?? 20, 20));
+  const effectiveLocale = params.locale ?? "ru";
 
   const providers = getProviders(params.providerIds);
   const debug: GetContentDebug = {
@@ -38,17 +40,27 @@ export const getContent = async (
   for (const provider of providers) {
     const request: ProviderRequest = {
       interestIds: interestIdsSorted,
-      limit: params.limit,
-      locale: params.locale,
+      limit: effectiveLimit,
+      locale: effectiveLocale,
     };
 
-    const hash = stableHash({
-      v: 1,
-      provider: provider.id,
-      interestIds: interestIdsSorted,
-      limit: params.limit ?? null,
-      locale: params.locale ?? null,
-    });
+    const hashInput =
+      provider.id === "youtube"
+        ? JSON.stringify({
+            provider: "youtube",
+            interestIds: interestIdsSorted,
+            limit: effectiveLimit,
+            locale: effectiveLocale,
+          })
+        : {
+            v: 1,
+            provider: provider.id,
+            interestIds: interestIdsSorted,
+            limit: effectiveLimit ?? null,
+            locale: effectiveLocale ?? null,
+          };
+
+    const hash = stableHash(hashInput);
 
     debug.hashes[provider.id] = hash;
 
@@ -56,6 +68,12 @@ export const getContent = async (
 
     if (cached) {
       debug.cacheHits[provider.id] = true;
+      if (process.env.NODE_ENV !== "production") {
+        console.info(`[content] cache hit for ${provider.id}`, {
+          hash,
+          count: cached.length,
+        });
+      }
       const baseOrder = itemsWithOrder.length;
       cached.forEach((item, index) => itemsWithOrder.push({ item, order: baseOrder + index }));
       continue;
@@ -63,6 +81,11 @@ export const getContent = async (
 
     debug.cacheHits[provider.id] = false;
     const providerItems = await provider.fetch(request);
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[content] fetched ${providerItems.length} items from ${provider.id}`, {
+        hash,
+      });
+    }
     await setCached(supabase, provider.id, hash, providerItems);
     const baseOrder = itemsWithOrder.length;
     providerItems.forEach((item, index) => itemsWithOrder.push({ item, order: baseOrder + index }));

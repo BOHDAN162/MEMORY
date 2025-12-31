@@ -43,8 +43,15 @@ export const isFresh = (createdAt: string, ttlSeconds: number): boolean => {
   return ageMs < ttlSeconds * 1000;
 };
 
+type CachePayload = {
+  items?: ContentItem[];
+  cachedAt?: string | null;
+  ttlHours?: number | null;
+};
+
 type CacheRow = {
-  payload_json?: ContentItem[] | null;
+  id?: string;
+  payload_json?: CachePayload | null;
   created_at?: string | null;
 };
 
@@ -60,7 +67,7 @@ export const getCached = async (
 
   const { data, error } = await supabase
     .from("content_cache")
-    .select("payload_json, created_at")
+    .select("id, payload_json, created_at")
     .eq("provider", providerId)
     .eq("query_hash", hash)
     .order("created_at", { ascending: false })
@@ -76,10 +83,18 @@ export const getCached = async (
     return null;
   }
 
-  const payload = Array.isArray(row.payload_json) ? row.payload_json : [];
-  const cachedAt = row.created_at ?? null;
+  const payload = row.payload_json;
+  const items = Array.isArray(payload?.items)
+    ? payload?.items
+    : Array.isArray(row.payload_json)
+      ? (row.payload_json as ContentItem[])
+      : [];
+  const cachedAt =
+    (payload?.cachedAt && typeof payload.cachedAt === "string" && payload.cachedAt) ||
+    row.created_at ||
+    null;
 
-  return payload.map((item) => ({ ...item, cachedAt: item.cachedAt ?? cachedAt }));
+  return items.map((item) => ({ ...item, cachedAt: item.cachedAt ?? cachedAt }));
 };
 
 export const setCached = async (
@@ -92,17 +107,44 @@ export const setCached = async (
     return;
   }
 
-  const payload = items.map((item) => ({
+  const now = new Date().toISOString();
+  const payloadItems = items.map((item) => ({
     ...item,
-    cachedAt: item.cachedAt ?? new Date().toISOString(),
+    cachedAt: item.cachedAt ?? now,
   }));
 
-  await supabase.from("content_cache").upsert(
-    {
-      provider: providerId,
-      query_hash: hash,
-      payload_json: payload,
-    },
-    { onConflict: "provider,query_hash" },
-  );
+  const payload: CachePayload = {
+    items: payloadItems,
+    cachedAt: now,
+    ttlHours: 12,
+  };
+
+  const { data, error } = await supabase
+    .from("content_cache")
+    .select("id")
+    .eq("provider", providerId)
+    .eq("query_hash", hash)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const existingId = data?.[0]?.id;
+
+  if (existingId) {
+    await supabase
+      .from("content_cache")
+      .update({ payload_json: payload, created_at: now })
+      .eq("id", existingId);
+    return;
+  }
+
+  const { error: insertError } = await supabase.from("content_cache").insert({
+    provider: providerId,
+    query_hash: hash,
+    payload_json: payload,
+    created_at: now,
+  });
+
+  if (error || insertError) {
+    // noop: cache failures should not break the flow
+  }
 };
