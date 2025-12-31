@@ -120,6 +120,11 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pendingNodeId, setPendingNodeId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(
+    null,
+  );
+  const toastTimeoutRef = useRef<number | null>(null);
+  const lastSuccessAtRef = useRef(0);
   const reactFlow = useReactFlow();
   const hasFittedRef = useRef(false);
 
@@ -182,12 +187,18 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
 
       if (result.error) {
         setSaveError(result.error);
+        setToast({ message: "Не удалось сохранить позицию", variant: "error" });
       } else {
         setLastSavedPositions((prev) => {
           const next = new Map(prev);
           next.set(interestId, { x: position.x, y: position.y });
           return next;
         });
+        const now = Date.now();
+        if (now - lastSuccessAtRef.current > 800) {
+          setToast({ message: "Сохранено", variant: "success" });
+          lastSuccessAtRef.current = now;
+        }
       }
 
       setIsSaving(false);
@@ -207,6 +218,27 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     },
     [lastSavedPositions, persistPosition],
   );
+
+  useEffect(
+    () => () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!toast) return;
+
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToast(null);
+    }, 1800);
+  }, [toast]);
 
   if (interests.length === 0) {
     return (
@@ -264,6 +296,18 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
       {saveError ? (
         <div className="absolute inset-x-0 bottom-0 bg-destructive/90 px-4 py-2 text-center text-sm font-semibold text-destructive-foreground">
           Не удалось сохранить позицию: {saveError}
+        </div>
+      ) : null}
+      {toast ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute right-3 top-3 min-w-[160px] rounded-full px-3 py-2 text-sm shadow-lg shadow-black/10 ring-1",
+            toast.variant === "success"
+              ? "bg-emerald-500/90 text-emerald-50 ring-emerald-500/60"
+              : "bg-destructive text-destructive-foreground ring-destructive/80",
+          )}
+        >
+          {toast.message}
         </div>
       ) : null}
     </div>

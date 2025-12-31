@@ -2,6 +2,7 @@
 
 import { getUserIdByAuthUserId } from "@/lib/server/interests";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { upsertMapLayoutPositions } from "@/lib/supabase/map-layout";
 import { revalidatePath } from "next/cache";
 
 export type SaveMapPositionResult = { error: string | null };
@@ -45,16 +46,17 @@ export const saveMapPosition = async (payload: {
     return { error: userIdError ?? "Unable to ensure user profile." };
   }
 
-  const { error } = await supabase.from("map_layout").upsert({
-    user_id: userId,
-    interest_id: payload.interestId,
-    x,
-    y,
-    updated_at: new Date().toISOString(),
-  });
+  const { error } = await upsertMapLayoutPositions(supabase, userId, [
+    {
+      interestId: payload.interestId,
+      x,
+      y,
+    },
+  ]);
 
   if (error) {
-    return { error: error.message };
+    const message = typeof error === "string" ? error : error.message;
+    return { error: message };
   }
 
   revalidatePath("/map");

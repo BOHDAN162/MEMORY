@@ -2,6 +2,7 @@
 
 import { getUserIdByAuthUserId } from "@/lib/server/interests";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { upsertMapLayoutPositions } from "@/lib/supabase/map-layout";
 import { revalidatePath } from "next/cache";
 
 export type SaveManyMapPositionsResult = { error: string | null };
@@ -33,23 +34,6 @@ export const saveMapPositions = async (payload: {
     return { error: null };
   }
 
-  const normalized = payload.positions
-    .map((item) => ({
-      interestId: item.interestId,
-      x: Number(item.x),
-      y: Number(item.y),
-    }))
-    .filter(
-      (item) =>
-        Boolean(item.interestId) &&
-        Number.isFinite(item.x) &&
-        Number.isFinite(item.y),
-    );
-
-  if (normalized.length === 0) {
-    return { error: "No valid coordinates provided." };
-  }
-
   const { data: userId, error: userIdError } = await getUserIdByAuthUserId(
     supabase,
     authUser.user,
@@ -59,19 +43,11 @@ export const saveMapPositions = async (payload: {
     return { error: userIdError ?? "Unable to ensure user profile." };
   }
 
-  const { error } = await supabase.from("map_layout").upsert(
-    normalized.map((item) => ({
-      user_id: userId,
-      interest_id: item.interestId,
-      x: item.x,
-      y: item.y,
-      updated_at: new Date().toISOString(),
-    })),
-    { onConflict: "user_id,interest_id" },
-  );
+  const { error } = await upsertMapLayoutPositions(supabase, userId, payload.positions);
 
   if (error) {
-    return { error: error.message };
+    const message = typeof error === "string" ? error : error.message;
+    return { error: message };
   }
 
   revalidatePath("/map");
