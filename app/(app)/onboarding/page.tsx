@@ -9,11 +9,11 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 type PersonalityAnswerRow = {
-  q1: string | null;
-  q2: string | null;
-  q3: string | null;
-  q4: string | null;
-  q5: string | null;
+  q1: number | null;
+  q2: number | null;
+  q3: number | null;
+  q4: number | null;
+  q5: number | null;
 };
 
 const fetchData = async (): Promise<{
@@ -54,7 +54,10 @@ const OnboardingContent = async () => {
 
   if (!supabase) {
     return (
-      <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+      <section
+        id="interests"
+        className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300"
+      >
         <p className="text-sm text-destructive">
           Supabase client is not configured. Проверьте переменные окружения.
         </p>
@@ -75,7 +78,10 @@ const OnboardingContent = async () => {
 
   if (profileError || !profile) {
     return (
-      <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+      <section
+        id="interests"
+        className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300"
+      >
         <p className="text-sm text-destructive">Не удалось загрузить профиль пользователя: {profileError}</p>
       </section>
     );
@@ -93,11 +99,11 @@ const OnboardingContent = async () => {
 
   const personalityAnswers: PersonalityAnswerFields | null = rawPersonalityAnswers
     ? {
-        q1: rawPersonalityAnswers.q1 ?? "",
-        q2: rawPersonalityAnswers.q2 ?? "",
-        q3: rawPersonalityAnswers.q3 ?? "",
-        q4: rawPersonalityAnswers.q4 ?? "",
-        q5: rawPersonalityAnswers.q5 ?? "",
+        q1: rawPersonalityAnswers.q1 ?? null,
+        q2: rawPersonalityAnswers.q2 ?? null,
+        q3: rawPersonalityAnswers.q3 ?? null,
+        q4: rawPersonalityAnswers.q4 ?? null,
+        q5: rawPersonalityAnswers.q5 ?? null,
       }
     : null;
 

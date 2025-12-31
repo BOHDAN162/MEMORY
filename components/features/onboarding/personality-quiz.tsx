@@ -1,17 +1,17 @@
 "use client";
 
-import { useMemo, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
 import { savePersonalityAnswers } from "@/app/actions/save-personality-answers";
 import { Button } from "@/components/ui/button";
 import type { PersonalityAnswerFields } from "@/lib/types/personality";
 import { cn } from "@/lib/utils/cn";
+import { useRouter } from "next/navigation";
 
 type PersonalityQuestionId = keyof PersonalityAnswerFields;
 
 type PersonalityQuestionOption = {
-  value: string;
+  value: number;
   label: string;
-  description?: string;
 };
 
 type PersonalityQuestion = {
@@ -31,73 +31,76 @@ type PersonalityQuizProps = {
   loadError?: string | null;
 };
 
+const NEXT_ONBOARDING_STEP = "/onboarding?step=interests#interests";
+
 const questions: PersonalityQuestion[] = [
   {
     id: "q1",
-    title: "Как вы начинаете новые задачи?",
-    description: "Подход к старту часто задаёт тон всей работе.",
+    title: "Как ты чаще действуешь?",
     options: [
-      { value: "structure-first", label: "Составляю план и иду по шагам" },
-      { value: "quick-prototype", label: "Сразу делаю быстрый прототип и улучшаю по ходу" },
-      { value: "research", label: "Сначала собираю максимум контекста и примеров" },
-      { value: "collaboration", label: "Обсуждаю с командой и распределяю роли" },
+      { value: 1, label: "Планирую заранее" },
+      { value: 2, label: "Импровизирую" },
+      { value: 3, label: "Делаю по шагам" },
+      { value: 4, label: "Пробую разное" },
     ],
   },
   {
     id: "q2",
-    title: "Как вы реагируете на изменения требований?",
+    title: "Что тебе ближе?",
     options: [
-      { value: "adapt-fast", label: "Быстро перестраиваюсь и ищу новое решение" },
-      { value: "protect-scope", label: "Стараюсь сохранить договорённый объём" },
-      { value: "clarify", label: "Уточняю детали и фиксирую приоритеты" },
+      { value: 1, label: "Люди и общение" },
+      { value: 2, label: "Идеи и смысл" },
+      { value: 3, label: "Дела и результат" },
+      { value: 4, label: "Творчество" },
     ],
   },
   {
     id: "q3",
-    title: "Что помогает вам поддерживать продуктивность?",
+    title: "Как учишься лучше?",
     options: [
-      { value: "focused-blocks", label: "Глубокая работа блоками времени" },
-      { value: "deadlines", label: "Чёткие дедлайны и контрольные точки" },
-      { value: "variety", label: "Чередование разных типов задач" },
-      { value: "feedback", label: "Регулярный фидбек от команды" },
+      { value: 1, label: "Короткими шагами" },
+      { value: 2, label: "Сразу в практике" },
+      { value: 3, label: "С примерами/видео" },
+      { value: 4, label: "Читаю и думаю" },
     ],
   },
   {
     id: "q4",
-    title: "Как вы предпочитаете учиться новому?",
+    title: "Когда сложно, ты…",
     options: [
-      { value: "practice", label: "Через практику и эксперименты" },
-      { value: "theory", label: "Сначала теория и структурированные курсы" },
-      { value: "mentorship", label: "Через созвоны с ментором/экспертами" },
-      { value: "community", label: "Обсуждаю в сообществах и рабочих группах" },
+      { value: 1, label: "Прошу помощь" },
+      { value: 2, label: "Разбираюсь сам" },
+      { value: 3, label: "Откладываю на потом" },
+      { value: 4, label: "Делаю как получится" },
     ],
   },
   {
     id: "q5",
-    title: "Как вы принимаете решения в неопределённости?",
+    title: "В выборе ты чаще…",
     options: [
-      { value: "hypothesis", label: "Формирую гипотезы и быстро проверяю" },
-      { value: "data", label: "Собираю больше данных перед выбором" },
-      { value: "intuition", label: "Опираюсь на интуицию и опыт" },
-      { value: "consensus", label: "Ищу консенсус и групповое решение" },
+      { value: 1, label: "Быстро решаю" },
+      { value: 2, label: "Собираю факты" },
+      { value: 3, label: "Слушаю интуицию" },
+      { value: 4, label: "Советуюсь с людьми" },
     ],
   },
 ];
 
 const createInitialAnswers = (initialAnswers?: PersonalityAnswerFields | null): PersonalityAnswerFields => ({
-  q1: initialAnswers?.q1 ?? "",
-  q2: initialAnswers?.q2 ?? "",
-  q3: initialAnswers?.q3 ?? "",
-  q4: initialAnswers?.q4 ?? "",
-  q5: initialAnswers?.q5 ?? "",
+  q1: initialAnswers?.q1 ?? null,
+  q2: initialAnswers?.q2 ?? null,
+  q3: initialAnswers?.q3 ?? null,
+  q4: initialAnswers?.q4 ?? null,
+  q5: initialAnswers?.q5 ?? null,
 });
 
 const findFirstIncompleteQuestion = (answers: PersonalityAnswerFields): number => {
-  const index = questions.findIndex((question) => !answers[question.id]);
+  const index = questions.findIndex((question) => answers[question.id] === null);
   return index === -1 ? 0 : index;
 };
 
 export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizProps) => {
+  const router = useRouter();
   const [answers, setAnswers] = useState<PersonalityAnswerFields>(() => createInitialAnswers(initialAnswers));
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(() =>
     findFirstIncompleteQuestion(createInitialAnswers(initialAnswers)),
@@ -107,27 +110,34 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
 
   const currentQuestion = questions[currentQuestionIndex];
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
+  const optionCount = currentQuestion.options.length;
+  const hasValidOptionCount = optionCount === 4;
 
-  const isCurrentAnswered = Boolean(answers[currentQuestion.id]);
   const allAnswered = useMemo(
-    () => questions.every((question) => Boolean(answers[question.id])),
+    () => questions.every((question) => answers[question.id] !== null),
     [answers],
   );
 
-  const handleOptionSelect = (questionId: PersonalityQuestionId, value: string) => {
+  useEffect(() => {
+    if (!hasValidOptionCount) {
+      console.warn(
+        `Personality question ${currentQuestion.id} is misconfigured: expected 4 options, received ${optionCount}.`,
+      );
+    }
+  }, [currentQuestion.id, hasValidOptionCount, optionCount]);
+
+  const handleOptionSelect = (questionId: PersonalityQuestionId, value: number) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
     setStatus(null);
+
+    if (!isLastQuestion) {
+      setCurrentQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1));
+    }
   };
 
   const handlePrevious = () => {
     setStatus(null);
     setCurrentQuestionIndex((prev) => Math.max(0, prev - 1));
-  };
-
-  const handleNext = () => {
-    if (!isCurrentAnswered) return;
-    setStatus(null);
-    setCurrentQuestionIndex((prev) => Math.min(questions.length - 1, prev + 1));
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -139,16 +149,18 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
       try {
         const formData = new FormData();
         questions.forEach((question) => {
-          formData.append(question.id, answers[question.id]);
+          formData.append(question.id, String(answers[question.id]));
         });
 
         const result = await savePersonalityAnswers(formData);
 
-        setStatus(
-          result.error
-            ? { type: "error", message: result.error }
-            : { type: "success", message: result.message ?? "Сохранено" },
-        );
+        if (result.error) {
+          setStatus({ type: "error", message: result.error });
+          return;
+        }
+
+        setStatus({ type: "success", message: result.message ?? "Сохранено" });
+        router.push(NEXT_ONBOARDING_STEP);
       } catch (error) {
         console.error("Failed to save personality answers", error);
         setStatus({
@@ -186,42 +198,46 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
           ) : null}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          {currentQuestion.options.map((option) => {
-            const isSelected = answers[currentQuestion.id] === option.value;
+        {hasValidOptionCount ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {currentQuestion.options.map((option) => {
+              const isSelected = answers[currentQuestion.id] === option.value;
 
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => handleOptionSelect(currentQuestion.id, option.value)}
-                className={cn(
-                  "group flex h-full flex-col gap-2 rounded-xl border border-border bg-background/60 p-4 text-left shadow-[0_12px_40px_-30px_rgba(0,0,0,0.45)] transition hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
-                  isSelected ? "border-primary ring-2 ring-primary/70" : "",
-                )}
-                aria-pressed={isSelected}
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="text-base font-semibold">{option.label}</span>
-                  <span
-                    className={cn(
-                      "inline-flex h-6 min-w-6 items-center justify-center rounded-full border text-xs font-semibold transition",
-                      isSelected
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-card/70 text-muted-foreground",
-                    )}
-                    aria-hidden
-                  >
-                    {isSelected ? "✓" : ""}
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleOptionSelect(currentQuestion.id, option.value)}
+                  className={cn(
+                    "group flex h-full flex-col gap-2 rounded-xl border border-border bg-background/60 p-4 text-left shadow-[0_12px_40px_-30px_rgba(0,0,0,0.45)] transition hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-70",
+                    isSelected ? "border-primary ring-2 ring-primary/70" : "",
+                  )}
+                  aria-pressed={isSelected}
+                  disabled={isPending}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-base font-semibold">{option.label}</span>
+                    <span
+                      className={cn(
+                        "inline-flex h-6 min-w-6 items-center justify-center rounded-full border text-xs font-semibold transition",
+                        isSelected
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border bg-card/70 text-muted-foreground",
+                      )}
+                      aria-hidden
+                    >
+                      {isSelected ? "✓" : ""}
+                    </span>
                   </span>
-                </span>
-                {option.description ? (
-                  <span className="text-sm text-muted-foreground">{option.description}</span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+            Вопрос временно недоступен. Попробуйте обновить страницу или сообщите команде.
+          </div>
+        )}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-muted-foreground">
@@ -246,11 +262,7 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
               <Button type="submit" disabled={!allAnswered || isPending}>
                 {isPending ? "Сохраняем..." : "Сохранить"}
               </Button>
-            ) : (
-              <Button type="button" onClick={handleNext} disabled={!isCurrentAnswered || isPending}>
-                Далее
-              </Button>
-            )}
+            ) : null}
           </div>
         </div>
       </form>

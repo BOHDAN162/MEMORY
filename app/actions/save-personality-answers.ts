@@ -12,7 +12,14 @@ const questionIds: Array<keyof PersonalityAnswerFields> = ["q1", "q2", "q3", "q4
 const parseAnswers = (formData: FormData): PersonalityAnswerFields => {
   return questionIds.reduce<PersonalityAnswerFields>((acc, questionId) => {
     const value = formData.get(questionId);
-    const normalized = typeof value === "string" ? value.trim() : "";
+    const parsedValue = typeof value === "string" ? Number(value) : null;
+    const normalized =
+      typeof parsedValue === "number" &&
+      Number.isInteger(parsedValue) &&
+      parsedValue >= 1 &&
+      parsedValue <= 4
+        ? parsedValue
+        : null;
 
     return { ...acc, [questionId]: normalized };
   }, {} as PersonalityAnswerFields);
@@ -36,7 +43,7 @@ export const savePersonalityAnswers = async (
   }
 
   const answers = parseAnswers(formData);
-  const hasEmptyFields = questionIds.some((questionId) => !answers[questionId]);
+  const hasEmptyFields = questionIds.some((questionId) => answers[questionId] === null);
 
   if (hasEmptyFields) {
     return { error: "Заполните все вопросы перед сохранением." };
@@ -51,24 +58,30 @@ export const savePersonalityAnswers = async (
     return { error: userIdError ?? "Unable to ensure user profile." };
   }
 
-  const { error: upsertError } = await supabase
-    .from("personality_answers")
-    .upsert(
-      [
-        {
-          user_id: userId,
-          q1: answers.q1,
-          q2: answers.q2,
-          q3: answers.q3,
-          q4: answers.q4,
-          q5: answers.q5,
-        },
-      ],
-      { onConflict: "user_id" },
-    );
+  try {
+    const { error: upsertError } = await supabase
+      .from("personality_answers")
+      .upsert(
+        [
+          {
+            user_id: userId,
+            q1: answers.q1,
+            q2: answers.q2,
+            q3: answers.q3,
+            q4: answers.q4,
+            q5: answers.q5,
+          },
+        ],
+        { onConflict: "user_id" },
+      );
 
-  if (upsertError) {
-    return { error: upsertError.message };
+    if (upsertError) {
+      console.error("Failed to save personality answers", upsertError);
+      return { error: "Не удалось сохранить ответы. Попробуйте ещё раз." };
+    }
+  } catch (error) {
+    console.error("Unexpected error while saving personality answers", error);
+    return { error: "Что-то пошло не так. Попробуйте ещё раз." };
   }
 
   const { error: personalityTypeError } = await supabase
