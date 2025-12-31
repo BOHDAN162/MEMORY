@@ -179,5 +179,50 @@ export const getContent = async (
     })
     .map(({ item }) => item);
 
-  return { items, debug };
+  const interestIdSet = new Set<string>();
+  items.forEach((item) => {
+    item.interestIds.forEach((interestId) => {
+      if (interestId) {
+        interestIdSet.add(interestId);
+      }
+    });
+  });
+
+  const interestTitleMap = new Map<string, string>();
+
+  if (supabase && interestIdSet.size > 0) {
+    const { data, error } = await supabase
+      .from("interests")
+      .select("id, title")
+      .in("id", Array.from(interestIdSet));
+
+    if (!error && Array.isArray(data)) {
+      data.forEach((row) => {
+        const interestId = (row as { id?: string }).id;
+        const title = (row as { title?: string }).title;
+        if (interestId && title) {
+          interestTitleMap.set(interestId, title);
+        }
+      });
+    } else if (process.env.NODE_ENV !== "production") {
+      console.warn("[content] failed to load interest titles", error?.message ?? error);
+    }
+  }
+
+  const enrichedItems = items.map((item) => {
+    const interestTitles = item.interestIds
+      .map((interestId) => interestTitleMap.get(interestId))
+      .filter((title): title is string => Boolean(title));
+
+    if (interestTitles.length === 0) {
+      return item;
+    }
+
+    return {
+      ...item,
+      interestTitles,
+    };
+  });
+
+  return { items: enrichedItems, debug };
 };
