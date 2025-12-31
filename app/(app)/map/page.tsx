@@ -1,12 +1,15 @@
 import { MapCanvas } from "@/components/features/map/map-canvas";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { getCurrentUserMapNodes } from "@/lib/server/map-layout";
+import { getCurrentUserMapData } from "@/lib/server/map-layout";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 const MapPage = async () => {
-  const { data: nodes, error } = await getCurrentUserMapNodes();
+  const { data, error } = await getCurrentUserMapData();
+
+  const nodes = data?.nodes ?? [];
+  const manualEdges = data?.manualEdges ?? [];
 
   if (error === "Not authenticated") {
     return (
@@ -48,7 +51,7 @@ const MapPage = async () => {
         </div>
       ) : null}
 
-      <MapCanvas interests={nodes ?? []} />
+      <MapCanvas interests={nodes} manualEdges={manualEdges} />
     </section>
   );
 };
