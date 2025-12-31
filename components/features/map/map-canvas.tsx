@@ -6,9 +6,11 @@ import { createManualEdgeAction } from "@/app/actions/create-manual-edge";
 import { deleteManualEdgeAction } from "@/app/actions/delete-manual-edge";
 import { saveMapPosition } from "@/app/actions/save-map-position";
 import { saveMapPositions } from "@/app/actions/save-map-positions";
+import { Button } from "@/components/ui/button";
 import { clusterKey, computeClusterLayout, placeMissingNodesNearClusters } from "@/lib/map/auto-layout";
 import type { MapInterestNode, MapManualEdge } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import { useRouter } from "next/navigation";
 import {
   Background,
   Controls,
@@ -280,6 +282,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectionHint, setSelectionHint] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     if (!shouldFitView || hasFittedRef.current || nodes.length === 0) return;
@@ -364,6 +367,11 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   }, []);
 
   const selectedInterestIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const selectedInterestIdsSorted = useMemo(
+    () => [...selectedInterestIds].sort(),
+    [selectedInterestIds],
+  );
+  const hasSelection = selectedInterestIdsSorted.length > 0;
 
   const isSelected = useCallback(
     (id: string) => {
@@ -536,6 +544,18 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setSelectedEdgeId(null);
   }, [clearSelection, connectMode]);
 
+  const handlePickSelected = useCallback(() => {
+    if (selectedInterestIdsSorted.length === 0) return;
+
+    const params = new URLSearchParams();
+    params.set("interests", selectedInterestIdsSorted.join(","));
+    router.push(`/content?${params.toString()}`);
+  }, [router, selectedInterestIdsSorted]);
+
+  const handlePickAll = useCallback(() => {
+    router.push("/content?mode=all");
+  }, [router]);
+
   const handleDeleteManualEdge = useCallback(async () => {
     if (!selectedEdgeId) return;
 
@@ -631,6 +651,9 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const selectionStatus = selectionMode
     ? "Режим выбора: тапните или кликните, чтобы добавить/убрать из множества."
     : "Для множественного выбора используйте Ctrl/⌘/Shift или включите «Выбор».";
+  const selectionHelperText = hasSelection
+    ? "Используем только отмеченные узлы."
+    : "Выберите хотя бы один интерес.";
 
   const positionStatus =
     pendingNodeId && isSaving
@@ -656,6 +679,38 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)]">
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 sm:inset-auto sm:right-3 sm:top-3 sm:w-[320px]">
+        <div className="pointer-events-auto flex flex-col gap-2 rounded-2xl border border-border/80 bg-background/95 px-4 py-3 shadow-lg shadow-black/10 backdrop-blur">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
+            Подбор контента
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            className="w-full justify-center"
+            disabled={!hasSelection}
+            onClick={handlePickSelected}
+          >
+            {hasSelection
+              ? `Подобрать по выбранным (${selectedInterestIdsSorted.length})`
+              : "Подобрать по выбранным"}
+          </Button>
+          <p className="text-xs text-muted-foreground">{selectionHelperText}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="soft"
+            className="w-full justify-center border border-border/60"
+            onClick={handlePickAll}
+          >
+            Подобрать по всем
+          </Button>
+          <p className="text-[11px] text-muted-foreground">
+            Выбранные интересы передадутся в /content в виде параметров запроса.
+          </p>
+        </div>
+      </div>
       <ReactFlowProvider>
         <div className="h-[70vh] min-h-[460px] w-full">
           <ReactFlow
@@ -686,7 +741,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
             />
             <Controls className="!bg-card !border-border !text-foreground" position="bottom-left" />
             <Panel
-              position="top-right"
+              position="top-left"
               className="rounded-xl bg-background/90 px-3 py-2 text-xs shadow-lg shadow-black/10 ring-1 ring-border"
             >
               <div className="flex items-center gap-2">
@@ -758,13 +813,9 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
                 >
                   Сбросить
                 </button>
-                <button
-                  type="button"
-                  disabled
-                  className="rounded-full bg-muted px-2 py-1 font-semibold text-muted-foreground"
-                >
-                  Подобрать по выбранным
-                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  Подбор контента — используйте панель справа.
+                </span>
               </div>
             </Panel>
           </ReactFlow>
