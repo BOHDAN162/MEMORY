@@ -12,6 +12,7 @@ export interface ContentItem {
   description?: string | null;
   meta?: Record<string, unknown>;
   interestIds: string[];
+  interestTitles?: string[];
   why?: string | null;
   score?: number | null;
   cachedAt?: string | null;

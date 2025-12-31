@@ -3,7 +3,9 @@ import { getContent } from "@/lib/server/content/service";
 import type { ContentProviderId } from "@/lib/server/content/types";
 import { getUserInterests } from "@/lib/server/interests";
 import { buttonVariants } from "@/components/ui/button";
+import ContentFeedback from "@/components/features/content/content-feedback";
 import PromptCopyButton from "@/components/features/content/prompt-copy-button";
+import { buildWhy } from "@/lib/content/why";
 
 type ContentPageProps = {
   searchParams?: {
@@ -32,6 +34,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   const idsFromQuery = idsParam.length > 0 ? idsParam : interestsParam;
   const debugParamRaw = searchParams?.debug;
   const debugParam = Array.isArray(debugParamRaw) ? debugParamRaw[0] : debugParamRaw;
+  const debugMode = debugParam === "1";
 
   const providerIds: ContentProviderId[] = ["youtube", "books", "articles", "telegram", "prompts"];
   let interestIds: string[] = [];
@@ -70,7 +73,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
     : null;
 
   const cards = contentResult?.items ?? [];
-  const debugEnabled = process.env.NODE_ENV !== "production" || debugParam === "1";
+  const debugEnabled = process.env.NODE_ENV !== "production" || debugMode;
   const debug = debugEnabled ? contentResult?.debug : null;
   const selectionDescription =
     selectionMode === "selected"
@@ -112,6 +115,8 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
       {cards.length > 0 ? (
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {cards.map((item) => {
+            const whyText = buildWhy(item);
+            const whySource = item.why && item.why.trim() ? "provider" : "fallback";
             const promptMeta = item.type === "prompt" && item.meta ? item.meta : null;
             const promptText =
               promptMeta && typeof (promptMeta as { promptText?: unknown }).promptText === "string"
@@ -129,7 +134,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
             return (
               <li
                 key={`${item.provider}:${item.id}`}
-                className="flex flex-col gap-2 rounded-xl border border-border bg-background/80 p-4 shadow-inner shadow-black/5"
+                className="group/card relative flex flex-col gap-2 rounded-xl border border-border bg-background/80 p-4 shadow-inner shadow-black/5"
               >
                 <div className="flex items-center justify-between gap-2 text-xs uppercase text-muted-foreground">
                   <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-semibold tracking-wide text-primary">
@@ -144,9 +149,9 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
                   {item.description ? (
                     <p className="text-sm text-muted-foreground">{item.description}</p>
                   ) : null}
-                  {item.why ? (
-                    <p className="text-xs text-foreground/80">Почему рекомендовано: {item.why}</p>
-                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    Почему рекомендовано: <span className="text-foreground/90">{whyText}</span>
+                  </p>
                   {item.type === "prompt" && promptText ? (
                     <div className="space-y-2 rounded-lg bg-muted/40 p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
@@ -172,7 +177,10 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
                   ) : null}
                   <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                     <span className="rounded-full bg-muted px-2 py-1">
-                      Интересы: {item.interestIds.join(", ") || "—"}
+                      Интересы:{" "}
+                      {item.interestTitles?.length
+                        ? item.interestTitles.join(", ")
+                        : item.interestIds.join(", ") || "—"}
                     </span>
                     {item.score !== null && item.score !== undefined ? (
                       <span className="rounded-full bg-muted px-2 py-1">Score: {item.score}</span>
@@ -183,6 +191,29 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
                       </span>
                     ) : null}
                   </div>
+                  <ContentFeedback
+                    className="md:pointer-events-none md:opacity-0 md:group-hover/card:pointer-events-auto md:group-hover/card:opacity-100"
+                    contentId={item.id}
+                    interestIds={item.interestIds}
+                    provider={item.provider}
+                    type={item.type}
+                  />
+                  {debugMode ? (
+                    <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-1">
+                        provider: {item.provider}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-1">
+                        score: {item.score ?? "—"}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-1">
+                        interests: {item.interestIds.length}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-1">
+                        why source: {whySource}
+                      </span>
+                    </div>
+                  ) : null}
                   {item.url ? (
                     <a
                       className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
