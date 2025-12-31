@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
 import { savePersonalityAnswers } from "@/app/actions/save-personality-answers";
 import { Button } from "@/components/ui/button";
-import type { PersonalityAnswerFields } from "@/lib/types/personality";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { personalityTypeMap } from "@/lib/config/personality-types";
+import type { PersonalityAnswerFields, PersonalityType, PersonalityTypeId } from "@/lib/types/personality";
 import { cn } from "@/lib/utils/cn";
 import { useRouter } from "next/navigation";
 
@@ -109,6 +119,11 @@ const findFirstIncompleteQuestion = (answers: PersonalityAnswerFields): number =
   return index === -1 ? 0 : index;
 };
 
+const getPersonalityDetails = (typeId: PersonalityTypeId | null): PersonalityType | null => {
+  if (!typeId) return null;
+  return personalityTypeMap[typeId] ?? null;
+};
+
 export const PersonalityQuiz = ({
   initialAnswers,
   loadError,
@@ -130,6 +145,11 @@ export const PersonalityQuiz = ({
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [isPending, startTransition] = useTransition();
   const [hasSaved, setHasSaved] = useState(false);
+  const [summaryTypeId, setSummaryTypeId] = useState<PersonalityTypeId | null>(null);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [shouldRedirectAfterClose, setShouldRedirectAfterClose] = useState(true);
+
+  const summaryType = useMemo(() => getPersonalityDetails(summaryTypeId), [summaryTypeId]);
 
   const currentQuestion = questions[currentQuestionIndex];
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
@@ -187,8 +207,19 @@ export const PersonalityQuiz = ({
           return;
         }
 
+        if (!result.personalityType) {
+          setStatus({
+            type: "error",
+            message: "Не удалось определить тип личности. Попробуйте ещё раз.",
+          });
+          return;
+        }
+
         setStatus({ type: "success", message: result.message ?? "Сохранено" });
         setHasSaved(true);
+        setSummaryTypeId(result.personalityType);
+        setShouldRedirectAfterClose(true);
+        setIsSummaryOpen(true);
       } catch (error) {
         console.error("Failed to save personality answers", error);
         setStatus({
@@ -203,110 +234,171 @@ export const PersonalityQuiz = ({
     router.push(onCompleteRedirectPath);
   };
 
+  const handleSummaryOpenChange = (open: boolean) => {
+    setIsSummaryOpen(open);
+    if (!open && shouldRedirectAfterClose && summaryTypeId) {
+      handleReturn();
+    }
+  };
+
+  const handleRetake = () => {
+    setShouldRedirectAfterClose(false);
+    setSummaryTypeId(null);
+    setIsSummaryOpen(false);
+    setStatus(null);
+    setHasSaved(false);
+    setAnswers(createInitialAnswers());
+    setCurrentQuestionIndex(0);
+  };
+
   return (
-    <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
-      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-primary">{badge}</p>
-          <h2 className="text-2xl font-semibold">{title}</h2>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-        <div className="text-sm text-muted-foreground">
-          Вопрос {currentQuestionIndex + 1} из {questions.length}
-        </div>
-      </div>
-
-      {loadError ? (
-        <p className="mb-4 text-sm text-destructive">Не удалось загрузить сохранённые ответы: {loadError}</p>
-      ) : null}
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="space-y-2">
-          <p className="text-lg font-semibold">{currentQuestion.title}</p>
-          {currentQuestion.description ? (
-            <p className="text-sm text-muted-foreground">{currentQuestion.description}</p>
-          ) : null}
-        </div>
-
-        {hasValidOptionCount ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {currentQuestion.options.map((option) => {
-              const isSelected = answers[currentQuestion.id] === option.value;
-
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => handleOptionSelect(currentQuestion.id, option.value)}
-                  className={cn(
-                    "group flex h-full flex-col gap-2 rounded-xl border border-border bg-background/60 p-4 text-left shadow-[0_12px_40px_-30px_rgba(0,0,0,0.45)] transition hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-70",
-                    isSelected ? "border-primary ring-2 ring-primary/70" : "",
-                  )}
-                  aria-pressed={isSelected}
-                  disabled={isPending}
-                >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="text-base font-semibold">{option.label}</span>
-                    <span
-                      className={cn(
-                        "inline-flex h-6 min-w-6 items-center justify-center rounded-full border text-xs font-semibold transition",
-                        isSelected
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-card/70 text-muted-foreground",
-                      )}
-                      aria-hidden
-                    >
-                      {isSelected ? "✓" : ""}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+    <>
+      <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-primary">{badge}</p>
+            <h2 className="text-2xl font-semibold">{title}</h2>
+            <p className="text-sm text-muted-foreground">{description}</p>
           </div>
-        ) : (
-          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            Вопрос временно недоступен. Попробуйте обновить страницу или сообщите команде.
-          </div>
-        )}
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-muted-foreground">
-            {status ? (
-              <span className={status.type === "success" ? "text-green-600" : "text-destructive"}>
-                {status.message}
-              </span>
-            ) : (
-              <span>Ответьте на каждый вопрос, чтобы перейти дальше.</span>
-            )}
+            Вопрос {currentQuestionIndex + 1} из {questions.length}
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-            {hasSaved ? (
+        </div>
+
+        {loadError ? (
+          <p className="mb-4 text-sm text-destructive">Не удалось загрузить сохранённые ответы: {loadError}</p>
+        ) : null}
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <p className="text-lg font-semibold">{currentQuestion.title}</p>
+            {currentQuestion.description ? (
+              <p className="text-sm text-muted-foreground">{currentQuestion.description}</p>
+            ) : null}
+          </div>
+
+          {hasValidOptionCount ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {currentQuestion.options.map((option) => {
+                const isSelected = answers[currentQuestion.id] === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => handleOptionSelect(currentQuestion.id, option.value)}
+                    className={cn(
+                      "group flex h-full flex-col gap-2 rounded-xl border border-border bg-background/60 p-4 text-left shadow-[0_12px_40px_-30px_rgba(0,0,0,0.45)] transition hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-70",
+                      isSelected ? "border-primary ring-2 ring-primary/70" : "",
+                    )}
+                    aria-pressed={isSelected}
+                    disabled={isPending}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-base font-semibold">{option.label}</span>
+                      <span
+                        className={cn(
+                          "inline-flex h-6 min-w-6 items-center justify-center rounded-full border text-xs font-semibold transition",
+                          isSelected
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-card/70 text-muted-foreground",
+                        )}
+                        aria-hidden
+                      >
+                        {isSelected ? "✓" : ""}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+              Вопрос временно недоступен. Попробуйте обновить страницу или сообщите команде.
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {status ? (
+                <span className={status.type === "success" ? "text-green-600" : "text-destructive"}>
+                  {status.message}
+                </span>
+              ) : (
+                <span>Ответьте на каждый вопрос, чтобы перейти дальше.</span>
+              )}
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              {hasSaved ? (
+                <Button
+                  type="button"
+                  variant="soft"
+                  onClick={handleReturn}
+                  disabled={isPending}
+                  className="sm:order-1"
+                >
+                  {returnLabel}
+                </Button>
+              ) : null}
               <Button
                 type="button"
-                variant="soft"
-                onClick={handleReturn}
-                disabled={isPending}
-                className="sm:order-1"
+                variant="ghost"
+                onClick={handlePrevious}
+                disabled={currentQuestionIndex === 0 || isPending}
               >
-                {returnLabel}
+                Назад
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={handlePrevious}
-              disabled={currentQuestionIndex === 0 || isPending}
-            >
-              Назад
-            </Button>
-            {isLastQuestion ? (
-              <Button type="submit" disabled={!allAnswered || isPending}>
-                {isPending ? "Сохраняем..." : "Сохранить"}
-              </Button>
-            ) : null}
+              {isLastQuestion ? (
+                <Button type="submit" disabled={!allAnswered || isPending}>
+                  {isPending ? "Сохраняем..." : "Сохранить"}
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </form>
-    </section>
+        </form>
+      </section>
+
+      <Dialog open={isSummaryOpen && Boolean(summaryType)} onOpenChange={handleSummaryOpenChange}>
+        <DialogContent className="space-y-4 p-7">
+          <DialogHeader className="space-y-3">
+            <p className="text-xs uppercase tracking-[0.25em] text-primary">Кто ты?</p>
+            <DialogTitle className="text-3xl font-semibold leading-tight">{summaryType?.title}</DialogTitle>
+            <DialogDescription className="text-base text-muted-foreground">
+              {summaryType?.slogan}
+            </DialogDescription>
+          </DialogHeader>
+
+          {summaryType ? (
+            <div className="rounded-2xl border border-border bg-accent/10 p-4">
+              <p className="text-sm font-semibold text-primary">Твои сильные стороны</p>
+              <ul className="mt-3 space-y-2 text-sm text-foreground">
+                {summaryType.strengths.map((strength) => (
+                  <li key={strength} className="flex items-start gap-2">
+                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+                    <span>{strength}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button
+                type="button"
+                variant="primary"
+                className="sm:min-w-[140px]"
+                onClick={() => setShouldRedirectAfterClose(true)}
+              >
+                Понятно
+              </Button>
+            </DialogClose>
+            <Button type="button" variant="ghost" onClick={handleRetake}>
+              Пройти ещё раз
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

@@ -9,6 +9,7 @@ export type UserProfile = {
   display_name: string | null;
   avatar_url: string | null;
   telegram_username: string | null;
+  personality_type: string | null;
 };
 
 type UserProfileResponse = {
@@ -66,7 +67,7 @@ export const getOrCreateUserProfile = async (
 
   const { data: existingProfile, error: existingProfileError } = await supabase
     .from("users")
-    .select("id, auth_user_id, display_name, avatar_url, telegram_username")
+    .select("id, auth_user_id, display_name, avatar_url, telegram_username, personality_type")
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
@@ -94,7 +95,7 @@ export const getOrCreateUserProfile = async (
 
   const { data: createdProfile, error: profileError } = await supabase
     .from("users")
-    .select("id, auth_user_id, display_name, avatar_url, telegram_username")
+    .select("id, auth_user_id, display_name, avatar_url, telegram_username, personality_type")
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
