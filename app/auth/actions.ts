@@ -24,6 +24,22 @@ const sanitizeReturnUrl = (value: string | null | undefined) => {
   return normalized.length > 0 ? normalized : "/content";
 };
 
+const sanitizeRedirectUrl = (value: string | null | undefined) => {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    if (["http:", "https:"].includes(url.protocol)) {
+      return url.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const signInWithPassword = async (formData: FormData): Promise<AuthResult | void> => {
   const email = formData.get("email")?.toString().trim() ?? "";
   const password = formData.get("password")?.toString() ?? "";
@@ -88,6 +104,31 @@ export const signUpWithPassword = async (formData: FormData): Promise<AuthResult
     error: null,
     message: "Проверьте почту, чтобы подтвердить регистрацию. После подтверждения войдите снова.",
   };
+};
+
+export const sendPasswordResetEmail = async (formData: FormData): Promise<AuthResult> => {
+  const email = formData.get("email")?.toString().trim() ?? "";
+  const redirectTo = sanitizeRedirectUrl(formData.get("redirectTo")?.toString());
+
+  if (!email) {
+    return { error: "Введите email." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  if (!supabase) {
+    return {
+      error: "Supabase client is not configured. Проверьте NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+    };
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { error: null, message: "Письмо для восстановления отправлено." };
 };
 
 export const logout = async (): Promise<AuthResult> => {
