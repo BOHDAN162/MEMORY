@@ -1,11 +1,10 @@
 import Link from "next/link";
-import { getContent } from "@/lib/server/content/service";
-import type { ContentProviderId } from "@/lib/server/content/types";
-import { getUserInterests } from "@/lib/server/interests";
+import ContentHub, { type ContentDebugInfo, type NormalizedContentItem } from "@/components/content/content-hub";
 import { buttonVariants } from "@/components/ui/button";
-import ContentFeedback from "@/components/features/content/content-feedback";
-import PromptCopyButton from "@/components/features/content/prompt-copy-button";
 import { buildWhy } from "@/lib/content/why";
+import { getContent } from "@/lib/server/content/service";
+import type { ContentItem, ContentProviderId, ContentType } from "@/lib/server/content/types";
+import { getUserInterests } from "@/lib/server/interests";
 
 type ContentPageProps = {
   searchParams?: {
@@ -72,177 +71,117 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
       })
     : null;
 
-  const cards = contentResult?.items ?? [];
-  const debugEnabled = process.env.NODE_ENV !== "production" || debugMode;
-  const debug = debugEnabled ? contentResult?.debug : null;
-  const selectionDescription =
-    selectionMode === "selected"
-      ? "Режим: только выбранные интересы из параметра ids."
-      : "Режим: все интересы пользователя.";
+  const items = contentResult?.items ?? [];
+  const debug: ContentDebugInfo | null = contentResult?.debug ?? null;
+
+  const providerLabels: Record<ContentProviderId, string> = {
+    youtube: "YouTube",
+    books: "Books",
+    articles: "Articles",
+    telegram: "Telegram",
+    prompts: "Prompts",
+  };
+
+  const typeLabels: Record<ContentType, string> = {
+    video: "Видео",
+    book: "Книга",
+    article: "Статья",
+    channel: "Канал",
+    prompt: "Промпт",
+  };
+
+  const getString = (value: unknown): string | null => {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    return null;
+  };
+
+  const getNumber = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    return null;
+  };
+
+  const getPromptMeta = (item: ContentItem) => {
+    const meta = item.meta as Record<string, unknown> | undefined;
+    const promptText = getString(meta?.promptText) ?? getString(meta?.prompt_text) ?? null;
+    const tagsRaw = Array.isArray(meta?.tags) ? (meta?.tags as unknown[]) : [];
+    const promptTags = tagsRaw
+      .filter((tag): tag is string => typeof tag === "string" && Boolean(tag))
+      .slice(0, 6);
+    return { promptText, promptTags };
+  };
+
+  const extractDate = (meta: Record<string, unknown> | undefined) => {
+    const publishedAt = getString(meta?.publishedAt) ?? getString(meta?.published_at) ?? null;
+    const createdAt = getString(meta?.createdAt) ?? getString(meta?.created_at) ?? null;
+    const publishedYear = getNumber(meta?.publishedYear) ?? getNumber(meta?.published_year) ?? null;
+    const sortableDate =
+      publishedAt && !Number.isNaN(new Date(publishedAt).getTime())
+        ? new Date(publishedAt).getTime()
+        : createdAt && !Number.isNaN(new Date(createdAt).getTime())
+          ? new Date(createdAt).getTime()
+          : publishedYear
+            ? new Date(publishedYear, 0, 1).getTime()
+            : null;
+    const dateLabel = publishedAt
+      ? new Date(publishedAt).toLocaleDateString("ru-RU", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : createdAt
+        ? new Date(createdAt).toLocaleDateString("ru-RU", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          })
+        : publishedYear
+          ? `Год: ${publishedYear}`
+          : null;
+
+    return { publishedAt, createdAt, publishedYear, sortableDate, dateLabel };
+  };
+
+  const normalizedItems: NormalizedContentItem[] = items.map((item) => {
+    const meta = item.meta as Record<string, unknown> | undefined;
+    const { promptText, promptTags } = item.type === "prompt" ? getPromptMeta(item) : { promptText: null, promptTags: [] };
+    const { publishedAt, createdAt, publishedYear, sortableDate, dateLabel } = extractDate(meta);
+    const providerLabel = providerLabels[item.provider] ?? item.provider.toUpperCase();
+    const typeLabel = typeLabels[item.type] ?? item.type.toUpperCase();
+    const whyText = buildWhy(item);
+
+    return {
+      ...item,
+      providerLabel,
+      typeLabel,
+      whyText,
+      promptText,
+      promptTags,
+      publishedAt,
+      createdAt,
+      publishedYear,
+      sortableDate,
+      dateLabel: dateLabel ?? null,
+    };
+  });
 
   return (
     <section className="space-y-4">
-      <h1>Контент</h1>
-
-      <div className="rounded-2xl border border-border bg-card/80 p-4 shadow-sm shadow-black/5">
-        <p className="text-[11px] uppercase tracking-[0.22em] text-primary">Параметры запроса</p>
-        <div className="mt-2 space-y-2">
-          <p className="text-base font-semibold text-foreground">{selectionDescription}</p>
-          <p className="text-sm text-muted-foreground">
-            Интересы: {interestIds.length > 0 ? interestIds.join(", ") : "не заданы"}
-          </p>
-          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span className="rounded-full bg-muted px-2 py-1">mode: {selectionMode}</span>
-            {idsFromQuery.length > 0 ? (
-              <span className="rounded-full bg-muted px-2 py-1">
-                ids: {idsFromQuery.join(", ")}
-              </span>
-            ) : null}
-          </div>
-        </div>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs uppercase tracking-[0.24em] text-primary">Контент-хаб</p>
+        <h1 className="text-3xl font-bold text-foreground">Подборка контента</h1>
+        <p className="text-sm text-muted-foreground">
+          Управляйте источниками, типами и сортировкой, чтобы быстро найти нужное.
+        </p>
       </div>
 
-      {interestsError ? (
-        <p className="text-destructive">Не удалось загрузить интересы: {interestsError}</p>
-      ) : null}
-
-      {!interestsError && interestIds.length === 0 ? (
-        <p className="text-muted-foreground">
-          Нет интересов для запроса. Добавьте интересы или передайте ids через строку запроса.
-        </p>
-      ) : null}
-
-      {cards.length > 0 ? (
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {cards.map((item) => {
-            const whyText = buildWhy(item);
-            const whySource = item.why && item.why.trim() ? "provider" : "fallback";
-            const promptMeta = item.type === "prompt" && item.meta ? item.meta : null;
-            const promptText =
-              promptMeta && typeof (promptMeta as { promptText?: unknown }).promptText === "string"
-                ? (promptMeta as { promptText: string }).promptText
-                : null;
-            const promptTags =
-              promptMeta && Array.isArray((promptMeta as { tags?: unknown }).tags)
-                ? (
-                    (promptMeta as { tags: unknown[] }).tags.filter(
-                      (tag): tag is string => typeof tag === "string" && Boolean(tag),
-                    )
-                  ).slice(0, 4)
-                : [];
-
-            return (
-              <li
-                key={`${item.provider}:${item.id}`}
-                className="group/card relative flex flex-col gap-2 rounded-xl border border-border bg-background/80 p-4 shadow-inner shadow-black/5"
-              >
-                <div className="flex items-center justify-between gap-2 text-xs uppercase text-muted-foreground">
-                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-semibold tracking-wide text-primary">
-                    {item.provider.toUpperCase()}
-                  </span>
-                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-medium">
-                    {item.type.toUpperCase()}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
-                  {item.description ? (
-                    <p className="text-sm text-muted-foreground">{item.description}</p>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground">
-                    Почему рекомендовано: <span className="text-foreground/90">{whyText}</span>
-                  </p>
-                  {item.type === "prompt" && promptText ? (
-                    <div className="space-y-2 rounded-lg bg-muted/40 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-                        Текст промпта
-                      </p>
-                      <p className="text-sm leading-relaxed text-foreground">{promptText}</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <PromptCopyButton text={promptText} />
-                        {promptTags.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {promptTags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="rounded-full bg-background px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span className="rounded-full bg-muted px-2 py-1">
-                      Интересы:{" "}
-                      {item.interestTitles?.length
-                        ? item.interestTitles.join(", ")
-                        : item.interestIds.join(", ") || "—"}
-                    </span>
-                    {item.score !== null && item.score !== undefined ? (
-                      <span className="rounded-full bg-muted px-2 py-1">Score: {item.score}</span>
-                    ) : null}
-                    {item.cachedAt ? (
-                      <span className="rounded-full bg-muted px-2 py-1">
-                        Cached: {new Date(item.cachedAt).toLocaleString()}
-                      </span>
-                    ) : null}
-                  </div>
-                  <ContentFeedback
-                    className="md:pointer-events-none md:opacity-0 md:group-hover/card:pointer-events-auto md:group-hover/card:opacity-100"
-                    contentId={item.id}
-                    interestIds={item.interestIds}
-                    provider={item.provider}
-                    type={item.type}
-                  />
-                  {debugMode ? (
-                    <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                      <span className="rounded-full bg-muted px-2 py-1">
-                        provider: {item.provider}
-                      </span>
-                      <span className="rounded-full bg-muted px-2 py-1">
-                        score: {item.score ?? "—"}
-                      </span>
-                      <span className="rounded-full bg-muted px-2 py-1">
-                        interests: {item.interestIds.length}
-                      </span>
-                      <span className="rounded-full bg-muted px-2 py-1">
-                        why source: {whySource}
-                      </span>
-                    </div>
-                  ) : null}
-                  {item.url ? (
-                    <a
-                      className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
-                      href={item.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Открыть
-                    </a>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="text-muted-foreground">Контента пока нет — провайдеры вернули пустой список.</p>
-      )}
-
-      {debug ? (
-        <details className="rounded-xl border border-dashed border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.22em] text-primary">
-            Debug
-          </summary>
-          <pre className="mt-2 whitespace-pre-wrap text-[12px] leading-relaxed">
-            {JSON.stringify(debug, null, 2)}
-          </pre>
-        </details>
-      ) : null}
+      <ContentHub
+        items={normalizedItems}
+        selectionMode={selectionMode}
+        interestIds={interestIds}
+        debug={debug}
+        debugEnabled={debugMode}
+        interestsError={interestsError}
+      />
     </section>
   );
 };
