@@ -21,6 +21,7 @@ export interface ProviderRequest {
   interestIds: string[];
   locale?: string;
   limit?: number;
+  mode?: "selected" | "all";
 }
 
 export interface ProviderFetchResult {
