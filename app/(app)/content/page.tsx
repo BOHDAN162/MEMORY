@@ -32,7 +32,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   const debugParamRaw = searchParams?.debug;
   const debugParam = Array.isArray(debugParamRaw) ? debugParamRaw[0] : debugParamRaw;
 
-  const providerIds: ContentProviderId[] = ["youtube", "books"];
+  const providerIds: ContentProviderId[] = ["youtube", "books", "articles"];
   let interestIds: string[] = [];
   let interestsError: string | null = null;
 
