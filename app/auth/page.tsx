@@ -6,16 +6,27 @@ import { redirect } from "next/navigation";
 
 type AuthPageProps = {
   searchParams?: {
-    returnTo?: string;
+    returnUrl?: string;
   };
 };
 
 const sanitizeRedirectTo = (value?: string) => {
-  if (!value || !value.startsWith("/")) {
+  if (!value) {
     return "/content";
   }
 
-  const normalized = value.startsWith("//") ? value.replace(/^\/+/, "/") : value;
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    decoded = value;
+  }
+
+  if (!decoded.startsWith("/")) {
+    return "/content";
+  }
+
+  const normalized = decoded.startsWith("//") ? decoded.replace(/^\/+/, "/") : decoded;
 
   if (normalized === "/auth") {
     return "/content";
@@ -25,11 +36,11 @@ const sanitizeRedirectTo = (value?: string) => {
 };
 
 const AuthPage = async ({ searchParams }: AuthPageProps) => {
-  const redirectTo = sanitizeRedirectTo(searchParams?.returnTo);
+  const returnUrl = sanitizeRedirectTo(searchParams?.returnUrl);
   const session = await getServerSession();
 
   if (session) {
-    redirect(redirectTo);
+    redirect(returnUrl);
   }
 
   const credentials = getSupabaseCredentials();
@@ -54,7 +65,7 @@ const AuthPage = async ({ searchParams }: AuthPageProps) => {
           </div>
         ) : null}
 
-        <AuthForm hasCredentials={hasCredentials} redirectTo={redirectTo} />
+        <AuthForm hasCredentials={hasCredentials} returnUrl={returnUrl} />
 
         <p className="text-xs text-muted-foreground">
           После входа вы автоматически вернётесь на /content и увидите персональные интересы.

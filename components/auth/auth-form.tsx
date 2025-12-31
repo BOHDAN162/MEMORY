@@ -9,11 +9,11 @@ import { cn } from "@/lib/utils/cn";
 type AuthMode = "sign-in" | "sign-up";
 
 type AuthFormProps = {
-  redirectTo?: string;
+  returnUrl?: string;
   hasCredentials: boolean;
 };
 
-export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormProps) => {
+export const AuthForm = ({ returnUrl = "/content", hasCredentials }: AuthFormProps) => {
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -35,7 +35,7 @@ export const AuthForm = ({ redirectTo = "/content", hasCredentials }: AuthFormPr
     const formData = new FormData();
     formData.append("email", email);
     formData.append("password", password);
-    formData.append("redirectTo", redirectTo);
+    formData.append("returnUrl", returnUrl);
 
     const action = mode === "sign-in" ? signInWithPassword : signUpWithPassword;
 
