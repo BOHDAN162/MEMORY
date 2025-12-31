@@ -23,8 +23,13 @@ export interface ProviderRequest {
   limit?: number;
 }
 
+export interface ProviderFetchResult {
+  items: ContentItem[];
+  error?: string | null;
+}
+
 export interface ContentProvider {
   id: ContentProviderId;
   ttlSeconds: number;
-  fetch(req: ProviderRequest): Promise<ContentItem[]>;
+  fetch(req: ProviderRequest): Promise<ProviderFetchResult>;
 }
