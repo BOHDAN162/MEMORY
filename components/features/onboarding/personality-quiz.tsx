@@ -29,9 +29,12 @@ type StatusMessage = {
 type PersonalityQuizProps = {
   initialAnswers?: PersonalityAnswerFields | null;
   loadError?: string | null;
+  onCompleteRedirectPath?: string;
+  badge?: string;
+  title?: string;
+  description?: string;
+  returnLabel?: string;
 };
-
-const NEXT_ONBOARDING_STEP = "/onboarding?step=interests#interests";
 
 const questions: PersonalityQuestion[] = [
   {
@@ -99,7 +102,15 @@ const findFirstIncompleteQuestion = (answers: PersonalityAnswerFields): number =
   return index === -1 ? 0 : index;
 };
 
-export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizProps) => {
+export const PersonalityQuiz = ({
+  initialAnswers,
+  loadError,
+  onCompleteRedirectPath = "/profile",
+  badge = "Персонализация",
+  title = "Тест личности",
+  description = "Ответьте на 5 вопросов, чтобы помочь нам подобрать более точные рекомендации.",
+  returnLabel = "Вернуться в профиль",
+}: PersonalityQuizProps) => {
   const router = useRouter();
   const [answers, setAnswers] = useState<PersonalityAnswerFields>(() => createInitialAnswers(initialAnswers));
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(() =>
@@ -107,6 +118,7 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
   );
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [hasSaved, setHasSaved] = useState(false);
 
   const currentQuestion = questions[currentQuestionIndex];
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
@@ -160,7 +172,7 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
         }
 
         setStatus({ type: "success", message: result.message ?? "Сохранено" });
-        router.push(NEXT_ONBOARDING_STEP);
+        setHasSaved(true);
       } catch (error) {
         console.error("Failed to save personality answers", error);
         setStatus({
@@ -171,15 +183,17 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
     });
   };
 
+  const handleReturn = () => {
+    router.push(onCompleteRedirectPath);
+  };
+
   return (
     <section className="rounded-2xl border border-border bg-card/80 p-6 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors duration-300">
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-primary">Onboarding</p>
-          <h2 className="text-2xl font-semibold">Тест личности</h2>
-          <p className="text-sm text-muted-foreground">
-            Ответьте на 5 вопросов. Результат нужен, чтобы подготовить рекомендации.
-          </p>
+          <p className="text-xs uppercase tracking-[0.25em] text-primary">{badge}</p>
+          <h2 className="text-2xl font-semibold">{title}</h2>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="text-sm text-muted-foreground">
           Вопрос {currentQuestionIndex + 1} из {questions.length}
@@ -249,7 +263,18 @@ export const PersonalityQuiz = ({ initialAnswers, loadError }: PersonalityQuizPr
               <span>Ответьте на каждый вопрос, чтобы перейти дальше.</span>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            {hasSaved ? (
+              <Button
+                type="button"
+                variant="soft"
+                onClick={handleReturn}
+                disabled={isPending}
+                className="sm:order-1"
+              >
+                {returnLabel}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="ghost"
