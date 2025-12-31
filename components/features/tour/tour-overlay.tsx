@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { TOUR_STEPS } from "@/lib/config/tour";
 
 const STORAGE_KEY = "memory.tour.v0.completed";
 const HIGHLIGHT_PADDING = 8;
+const TOOLTIP_VIEWPORT_PADDING = 12;
 
 type TargetRect = {
   top: number;
@@ -23,6 +25,11 @@ export const TourOverlay = () => {
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
   const [isTargetMissing, setIsTargetMissing] = useState(false);
+  const [isMounted] = useState(() => typeof window !== "undefined");
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(
+    null,
+  );
 
   const currentStep = TOUR_STEPS[stepIndex];
   const isLastStep = stepIndex === TOUR_STEPS.length - 1;
@@ -94,28 +101,72 @@ export const TourOverlay = () => {
     };
   }, [isOpen, currentStep]);
 
-  const tooltipPosition = useMemo(() => {
-    if (!targetRect) {
-      return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" } as const;
-    }
+  const updateTooltipPosition = useCallback(() => {
+    if (!isOpen || !tooltipRef.current) return;
 
     const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
     const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
-    const estimatedHeight = 220;
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
 
-    const preferredTop = targetRect.top + targetRect.height + 16;
-    let top = preferredTop;
+    if (!viewportWidth || !viewportHeight) return;
 
-    if (viewportHeight && preferredTop + estimatedHeight > viewportHeight - 16) {
-      top = Math.max(targetRect.top - estimatedHeight - 16, 16);
+    const placement = currentStep?.placement ?? "bottom";
+    const defaultTop = (viewportHeight - tooltipRect.height) / 2;
+    const defaultLeft = (viewportWidth - tooltipRect.width) / 2;
+
+    if (!targetRect) {
+      setTooltipPosition({
+        top: clamp(defaultTop, TOOLTIP_VIEWPORT_PADDING, viewportHeight - tooltipRect.height - TOOLTIP_VIEWPORT_PADDING),
+        left: clamp(defaultLeft, TOOLTIP_VIEWPORT_PADDING, viewportWidth - tooltipRect.width - TOOLTIP_VIEWPORT_PADDING),
+      });
+      return;
     }
 
-    const centerLeft = targetRect.left + targetRect.width / 2;
-    const maxLeft = viewportWidth ? viewportWidth - 16 : centerLeft;
-    const left = viewportWidth ? clamp(centerLeft, 16, maxLeft) : centerLeft;
+    let top = targetRect.top + targetRect.height + TOOLTIP_VIEWPORT_PADDING;
+    let left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2;
 
-    return { top, left, transform: "translate(-50%, 0)" } as const;
-  }, [targetRect]);
+    if (placement === "top") {
+      top = targetRect.top - tooltipRect.height - TOOLTIP_VIEWPORT_PADDING;
+      left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2;
+    } else if (placement === "left") {
+      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2;
+      left = targetRect.left - tooltipRect.width - TOOLTIP_VIEWPORT_PADDING;
+    } else if (placement === "right") {
+      top = targetRect.top + targetRect.height / 2 - tooltipRect.height / 2;
+      left = targetRect.left + targetRect.width + TOOLTIP_VIEWPORT_PADDING;
+    }
+
+    setTooltipPosition({
+      top: clamp(top, TOOLTIP_VIEWPORT_PADDING, viewportHeight - tooltipRect.height - TOOLTIP_VIEWPORT_PADDING),
+      left: clamp(left, TOOLTIP_VIEWPORT_PADDING, viewportWidth - tooltipRect.width - TOOLTIP_VIEWPORT_PADDING),
+    });
+  }, [currentStep?.placement, isOpen, targetRect]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const frame = requestAnimationFrame(updateTooltipPosition);
+    return () => cancelAnimationFrame(frame);
+  }, [isOpen, stepIndex, targetRect, updateTooltipPosition]);
+
+  useEffect(() => {
+    if (!isOpen || !tooltipRef.current) return;
+
+    const observer = new ResizeObserver(() => updateTooltipPosition());
+    observer.observe(tooltipRef.current);
+
+    return () => observer.disconnect();
+  }, [isOpen, updateTooltipPosition]);
+
+  const tooltipStyle = useMemo(() => {
+    if (tooltipPosition) {
+      return {
+        top: tooltipPosition.top,
+        left: tooltipPosition.left,
+      } as const;
+    }
+
+    return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" } as const;
+  }, [tooltipPosition]);
 
   if (!isOpen || !currentStep) return null;
 
@@ -128,7 +179,9 @@ export const TourOverlay = () => {
       }
     : undefined;
 
-  return (
+  if (!isMounted) return null;
+
+  return createPortal(
     <div className="pointer-events-none fixed inset-0 z-50">
       <div className="pointer-events-none absolute inset-0 bg-background/60 backdrop-blur-[2px]" aria-hidden />
       {highlightStyle ? (
@@ -138,23 +191,29 @@ export const TourOverlay = () => {
         />
       ) : null}
       <div
-        className="pointer-events-auto absolute z-10 max-w-sm rounded-xl border border-primary/30 bg-card p-4 shadow-xl shadow-black/20"
-        style={tooltipPosition}
+        ref={tooltipRef}
+        className="pointer-events-auto absolute z-10 flex w-[min(360px,calc(100vw-24px))] max-h-[calc(100vh-24px)] flex-col gap-3 rounded-xl border border-primary/30 bg-card p-3 shadow-xl shadow-black/20"
+        style={tooltipStyle}
         role="dialog"
         aria-live="polite"
         aria-label={`Tour step ${stepIndex + 1}`}
       >
-        <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-primary">
-          <span>Шаг {stepIndex + 1}/{TOUR_STEPS.length}</span>
-          {isTargetMissing ? (
-            <span className="text-[11px] text-muted-foreground">Элемент вне видимой области</span>
-          ) : null}
+        <div className="flex items-start justify-between gap-3 text-[11px] uppercase tracking-wide text-primary">
+          <div className="flex flex-col gap-1">
+            <span>Шаг {stepIndex + 1}/{TOUR_STEPS.length}</span>
+            {isTargetMissing ? (
+              <span className="text-[11px] normal-case text-muted-foreground">Элемент вне видимой области</span>
+            ) : null}
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={finishTour} aria-label="Закрыть тур">
+            ×
+          </Button>
         </div>
-        <div className="space-y-2">
-          <p className="text-lg font-semibold leading-tight">{currentStep.title}</p>
-          <p className="text-sm text-muted-foreground">{currentStep.description}</p>
+        <div className="space-y-1.5 overflow-auto text-sm leading-relaxed text-muted-foreground">
+          <p className="text-base font-semibold leading-tight text-foreground">{currentStep.title}</p>
+          <p>{currentStep.description}</p>
         </div>
-        <div className="mt-4 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={finishTour}>
             Пропустить
           </Button>
@@ -182,7 +241,8 @@ export const TourOverlay = () => {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
