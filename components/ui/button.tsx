@@ -3,7 +3,7 @@ import { forwardRef } from "react";
 import { cn } from "@/lib/utils/cn";
 
 type ButtonVariant = "primary" | "ghost" | "soft";
-type ButtonSize = "md" | "sm";
+type ButtonSize = "md" | "sm" | "icon";
 
 export const buttonVariants = ({
   variant = "primary",
@@ -27,9 +27,10 @@ export const buttonVariants = ({
   };
 
   const sizeStyles: Record<ButtonSize, string> = {
-    md: "h-11 px-4 text-sm",
-    sm: "h-9 px-3 text-xs",
-  };
+  md: "h-11 px-4 text-sm",
+  sm: "h-9 px-3 text-xs",
+  icon: "h-8 w-8 p-0",
+};
 
   return cn(baseStyles, variantStyles[variant], sizeStyles[size], className);
 };
