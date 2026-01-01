@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import ContentGrid from "@/components/content/ContentGrid";
 import ContentToolbar from "@/components/content/ContentToolbar";
 import type { ContentProviderId, ContentType, ContentItem } from "@/lib/server/content/types";
-import { cn } from "@/lib/utils/cn";
 
 /* =========================
    🔒 СТАБИЛЬНАЯ КОНФИГУРАЦИЯ
@@ -68,6 +66,7 @@ type ContentHubProps = {
   debug?: ContentDebugInfo | null;
   debugEnabled?: boolean;
   interestsError?: string | null;
+  availableProviders: ContentProviderId[];
 };
 
 /* =========================
@@ -132,16 +131,13 @@ const sortItems = (items: NormalizedContentItem[], sort: SortOption, seed: numbe
 
 const ContentHub = ({
   items,
-  selectionMode,
-  interestIds,
   debug,
   debugEnabled = false,
   interestsError,
+  availableProviders,
 }: ContentHubProps) => {
-  const router = useRouter();
-
   /* 🔒 ЖЁСТКО: провайдеры НЕ зависят от items */
-  const providerOptions = ALL_PROVIDERS;
+  const providerOptions = availableProviders.length > 0 ? availableProviders : ALL_PROVIDERS;
 
   const [activeType, setActiveType] = useState<ContentType | "all">("all");
   const [selectedProviders, setSelectedProviders] =
@@ -149,18 +145,17 @@ const ContentHub = ({
   const [sort, setSort] = useState<SortOption>("relevance");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [randomSeed, setRandomSeed] = useState(() =>
-    buildSeed(items.map((i) => i.id).join("|")),
+  const [seedNonce, setSeedNonce] = useState(0);
+
+  const randomSeed = useMemo(
+    () => buildSeed(`${items.map((i) => i.id).join("|")}|${seedNonce}`),
+    [items, seedNonce],
   );
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
-
-  useEffect(() => {
-    setRandomSeed(buildSeed(items.map((i) => i.id).join("|")));
-  }, [items]);
 
   const filteredItems = useMemo(() => {
     const byProvider =
@@ -187,7 +182,7 @@ const ContentHub = ({
     setSort("relevance");
     setSearch("");
     setDebouncedSearch("");
-    setRandomSeed(buildSeed(items.map((i) => i.id).join("|")));
+    setSeedNonce((prev) => prev + 1);
   };
 
   return (

@@ -181,6 +181,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         debug={debug}
         debugEnabled={debugMode}
         interestsError={interestsError}
+        availableProviders={providerIds}
       />
     </section>
   );
