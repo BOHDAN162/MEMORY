@@ -22,12 +22,11 @@ import { clusterKey, computeClusterLayout, placeMissingNodesNearClusters } from 
 import type { MapInterestNode, MapManualEdge } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
-import { CircleHelp, Hand, Maximize2, MousePointer2, RefreshCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { CircleHelp, Hand, Maximize2, MousePointer2, PanelLeft, RefreshCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   Background,
   BackgroundVariant,
-  MiniMap,
   Panel,
   ReactFlow,
   ReactFlowProvider,
@@ -297,6 +296,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const [edgeError, setEdgeError] = useState<string | null>(null);
   const [edgePendingKey, setEdgePendingKey] = useState<string | null>(null);
   const reactFlow = useReactFlow();
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const hasFittedRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -806,11 +806,13 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     return <EmptyMapState />;
   }
 
+  const togglePanel = () => setIsPanelOpen((prev) => !prev);
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)]">
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_35%_20%,rgba(124,58,237,0.12),transparent_45%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_70%,rgba(79,70,229,0.08),transparent_50%)]" />
-      <div className="h-[70vh] min-h-[480px] w-full">
+      <div className="relative h-full min-h-[520px] w-full">
         <ReactFlow
           nodes={displayedNodes}
           edges={styledEdges}
@@ -839,126 +841,159 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
             size={1.4}
             color="rgba(255,255,255,0.06)"
           />
-          <MiniMap
-            className="!bg-card/85 !text-muted-foreground"
-            nodeColor="rgba(124, 58, 237, 0.82)"
-            nodeBorderRadius={14}
-            pannable
-            zoomable
-            position="bottom-right"
-          />
 
-            <Panel
-              position="top-right"
-              className="max-w-[min(380px,calc(100vw-24px))] rounded-2xl border border-border/80 bg-background/95 px-4 py-3 shadow-xl shadow-black/15 backdrop-blur"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
-                    Подбор контента
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Отметьте интересы или используйте все сразу — откроется /content.
-                  </p>
-                </div>
-                <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
-                  {hasSelection ? `Выбрано ${selectedInterestIdsSorted.length}` : "Нет выбора"}
-                </span>
+          <Panel
+            position="top-right"
+            className="max-w-[min(380px,calc(100vw-24px))] rounded-2xl border border-border/80 bg-background/95 px-4 py-3 shadow-xl shadow-black/15 backdrop-blur"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
+                  Подбор контента
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Отметьте интересы или используйте все сразу — откроется /content.
+                </p>
               </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="primary"
-                  className="w-full justify-center"
-                  disabled={!hasSelection}
-                  onClick={handlePickSelected}
-                >
-                  {hasSelection
-                    ? `Подобрать по выбранным (${selectedInterestIdsSorted.length})`
-                    : "Подобрать по выбранным"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="soft"
-                  className="w-full justify-center border border-border/60"
-                  onClick={handlePickAll}
-                >
-                  Подобрать по всем
-                </Button>
-              </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{selectionHelperText}</p>
-            </Panel>
+              <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
+                {hasSelection ? `Выбрано ${selectedInterestIdsSorted.length}` : "Нет выбора"}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                className="w-full justify-center"
+                disabled={!hasSelection}
+                onClick={handlePickSelected}
+              >
+                {hasSelection
+                  ? `Подобрать по выбранным (${selectedInterestIdsSorted.length})`
+                  : "Подобрать по выбранным"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="soft"
+                className="w-full justify-center border border-border/60"
+                onClick={handlePickAll}
+              >
+                Подобрать по всем
+              </Button>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{selectionHelperText}</p>
+          </Panel>
 
-            <Panel
-              position="top-left"
-              className="max-w-[min(420px,calc(100vw-24px))] rounded-2xl border border-border/80 bg-background/95 px-4 py-3 text-xs shadow-xl shadow-black/15 backdrop-blur"
+          <Panel position="top-left" className="pointer-events-none">
+            <div
+              className={cn(
+                "pointer-events-auto relative w-[min(420px,calc(100vw-24px))] max-w-[420px]",
+                isPanelOpen
+                  ? "max-w-[420px]"
+                  : "max-w-[64px] sm:max-w-[72px]",
+              )}
             >
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="absolute left-0 top-0 z-20 flex gap-2">
                 <Button
                   type="button"
                   size="sm"
-                  variant={connectMode ? "primary" : "soft"}
-                  className={cn(
-                    "h-9 rounded-full px-3",
-                    edgePendingKey && "cursor-not-allowed opacity-60",
-                  )}
-                  disabled={Boolean(edgePendingKey)}
-                  onClick={handleConnectToggle}
+                  variant={isPanelOpen ? "primary" : "soft"}
+                  className="h-9 rounded-full px-3 shadow-lg shadow-black/20"
+                  onClick={togglePanel}
                 >
-                  <MousePointer2 className="h-4 w-4" aria-hidden />
-                  <span className="hidden sm:inline">Соединить</span>
+                  <PanelLeft className="h-4 w-4" aria-hidden />
+                  <span className="hidden sm:inline">Панель</span>
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="soft"
-                  className={cn(
-                    "h-9 rounded-full px-3",
-                    (!canDeleteSelected || edgePendingKey) && "cursor-not-allowed opacity-60",
-                    canDeleteSelected && !edgePendingKey && "text-destructive",
-                  )}
-                  disabled={!canDeleteSelected || Boolean(edgePendingKey)}
-                  onClick={() => void handleDeleteManualEdge()}
-                >
-                  <RefreshCcw className="h-4 w-4 rotate-45" aria-hidden />
-                  <span className="hidden sm:inline">Удалить связь</span>
-                </Button>
-                <div className="flex items-center gap-2 rounded-full border border-border/70 bg-card/70 px-3 py-1.5 text-[11px] shadow-inner shadow-black/5">
-                  <span className="font-semibold text-foreground">Выбрано: {selectedInterestIds.length}</span>
-                  <button
-                    type="button"
-                    onClick={clearSelection}
-                    disabled={selectedInterestIds.length === 0}
-                    className={cn(
-                      "rounded-full px-2 py-1 font-semibold transition",
-                      selectedInterestIds.length === 0
-                        ? "cursor-not-allowed bg-muted text-muted-foreground"
-                        : "bg-primary/10 text-primary hover:bg-primary/20",
-                    )}
-                  >
-                    Сбросить
-                  </button>
+              </div>
+
+              <div
+                className={cn(
+                  "mt-0 overflow-hidden transition-[max-height,opacity,transform] duration-200",
+                  isPanelOpen
+                    ? "max-h-[calc(100vh-180px)] opacity-100"
+                    : "pointer-events-none max-h-0 opacity-0",
+                )}
+              >
+                <div className="mt-12 max-h-[calc(100vh-220px)] overflow-y-auto rounded-2xl border border-border/80 bg-background/95 px-4 py-3 text-xs shadow-xl shadow-black/15 backdrop-blur">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={connectMode ? "primary" : "soft"}
+                        className={cn(
+                          "h-9 rounded-full px-3",
+                          edgePendingKey && "cursor-not-allowed opacity-60",
+                        )}
+                        disabled={Boolean(edgePendingKey)}
+                        onClick={handleConnectToggle}
+                      >
+                        <MousePointer2 className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">Соединить</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="soft"
+                        className={cn(
+                          "h-9 rounded-full px-3",
+                          (!canDeleteSelected || edgePendingKey) && "cursor-not-allowed opacity-60",
+                          canDeleteSelected && !edgePendingKey && "text-destructive",
+                        )}
+                        disabled={!canDeleteSelected || Boolean(edgePendingKey)}
+                        onClick={() => void handleDeleteManualEdge()}
+                      >
+                        <RefreshCcw className="h-4 w-4 rotate-45" aria-hidden />
+                        <span className="hidden sm:inline">Удалить связь</span>
+                      </Button>
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                      onClick={togglePanel}
+                    >
+                      <X className="h-4 w-4" aria-hidden />
+                    </Button>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 rounded-full border border-border/70 bg-card/70 px-3 py-1.5 text-[11px] shadow-inner shadow-black/5">
+                    <span className="font-semibold text-foreground">Выбрано: {selectedInterestIds.length}</span>
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      disabled={selectedInterestIds.length === 0}
+                      className={cn(
+                        "rounded-full px-2 py-1 font-semibold transition",
+                        selectedInterestIds.length === 0
+                          ? "cursor-not-allowed bg-muted text-muted-foreground"
+                          : "bg-primary/10 text-primary hover:bg-primary/20",
+                      )}
+                    >
+                      Сбросить
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-1 text-[11px] leading-relaxed text-muted-foreground">
+                    <p className="text-foreground/80">{connectHint}</p>
+                    <p className="text-foreground/80">{selectionStatus}</p>
+                    <p>{edgeStatus}</p>
+                    {edgeError ? <p className="text-destructive">{edgeError}</p> : null}
+                    {selectionHint ? <p className="text-primary">{selectionHint}</p> : null}
+                  </div>
+                  <div className="mt-3 grid gap-1 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-2 font-semibold text-foreground">
+                      <CircleHelp className="h-3.5 w-3.5 text-primary" aria-hidden />
+                      <span>Быстрые подсказки</span>
+                    </div>
+                    <p>Клик — выбрать. Shift/Ctrl — мульти.</p>
+                    <p>Перетяни узел — позиция сохранится. Фит-вью внизу слева.</p>
+                    <p>На мобильном включи «Режим выбора», чтобы отметить несколько.</p>
+                  </div>
                 </div>
               </div>
-              <div className="mt-3 grid gap-1 text-[11px] leading-relaxed text-muted-foreground">
-                <p className="text-foreground/80">{connectHint}</p>
-                <p className="text-foreground/80">{selectionStatus}</p>
-                <p>{edgeStatus}</p>
-                {edgeError ? <p className="text-destructive">{edgeError}</p> : null}
-                {selectionHint ? <p className="text-primary">{selectionHint}</p> : null}
-              </div>
-              <div className="mt-3 grid gap-1 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-[11px] text-muted-foreground">
-                <div className="flex items-center gap-2 font-semibold text-foreground">
-                  <CircleHelp className="h-3.5 w-3.5 text-primary" aria-hidden />
-                  <span>Быстрые подсказки</span>
-                </div>
-                <p>Клик — выбрать. Shift/Ctrl — мульти.</p>
-                <p>Перетяни узел — позиция сохранится. Фит-вью внизу слева.</p>
-                <p>На мобильном включи «Режим выбора», чтобы отметить несколько.</p>
-              </div>
-            </Panel>
+            </div>
+          </Panel>
 
           <Panel
             position="bottom-left"

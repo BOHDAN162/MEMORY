@@ -26,23 +26,9 @@ const MapPage = async () => {
   }
 
   return (
-    <section className="space-y-5">
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/80 p-5 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)] backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <p className="text-xs uppercase tracking-[0.25em] text-primary">Карта</p>
-          <h2 className="text-xl font-semibold">Интерактивная карта интересов</h2>
-          <p className="text-sm text-muted-foreground">
-            Узлы подтягиваются из выбранных интересов. Перетаскивайте элементы — позиции сохранятся. В
-            панели карты можно выбрать интересы и перейти к подбору контента.
-          </p>
-        </div>
-        <Link className={buttonVariants({ variant: "primary", size: "sm" })} href="/content">
-          Открыть контент
-        </Link>
-      </div>
-
+    <section className="relative h-[calc(100vh-160px)] w-full min-h-[560px] overflow-hidden">
       {error ? (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-foreground">
+        <div className="absolute left-4 right-4 top-4 z-10 rounded-xl border border-destructive/40 bg-destructive/90 px-4 py-3 text-sm text-destructive-foreground shadow-lg">
           Не удалось загрузить карту интересов: {error}
         </div>
       ) : null}
