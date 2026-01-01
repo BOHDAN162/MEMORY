@@ -2,6 +2,7 @@
 
 import "@xyflow/react/dist/style.css";
 
+import { addUserInterestAction } from "@/app/actions/add-user-interest";
 import { createManualEdgeAction } from "@/app/actions/create-manual-edge";
 import { deleteManualEdgeAction } from "@/app/actions/delete-manual-edge";
 import { saveMapPosition } from "@/app/actions/save-map-position";
@@ -22,7 +23,19 @@ import { clusterKey, computeClusterLayout, placeMissingNodesNearClusters } from 
 import type { MapInterestNode, MapManualEdge } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
-import { CircleHelp, Hand, Maximize2, MousePointer2, PanelLeft, RefreshCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  CircleHelp,
+  Hand,
+  Maximize2,
+  MousePointer2,
+  PanelLeft,
+  Plus,
+  RefreshCcw,
+  Sparkles,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   Background,
@@ -49,6 +62,9 @@ type InterestNodeData = {
   isSelected?: boolean;
   isMultiSelected?: boolean;
   isDragging?: boolean;
+  isConnectSource?: boolean;
+  isConnectTarget?: boolean;
+  isPreviewTarget?: boolean;
 };
 
 type MapCanvasProps = {
@@ -57,6 +73,18 @@ type MapCanvasProps = {
 };
 
 type InterestFlowNode = Node<InterestNodeData>;
+type RecommendationItem = {
+  id: string;
+  title: string;
+  cluster: string | null;
+  clusterLabel: string;
+  score: number;
+};
+
+// Quick map diagnosis:
+// - Nodes are rendered via components/features/map/interest-node.tsx (nodeTypes).
+// - Panel controls live inside this map-canvas component (ReactFlow Panel sections).
+// - Connect mode logic is handled in handleConnectToggle/handleNodeClick with manualEdgesState.
 
 const EmptyMapState = () => (
   <div className="flex h-[60vh] min-h-[360px] w-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 text-center shadow-inner shadow-black/5">
@@ -100,20 +128,34 @@ const autoEdgeId = (cluster: string, a: string, b: string) => {
   return `a:${cluster}:${source}-${target}`;
 };
 
-const EDGE_TRANSITION = "stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease";
+const EDGE_TRANSITION =
+  "stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease, filter 180ms ease";
 
 const AUTO_EDGE_STYLE = {
-  stroke: "hsl(var(--foreground) / 0.22)",
-  strokeWidth: 1.35,
-  opacity: 0.65,
+  stroke: "hsl(var(--muted-foreground) / 0.35)",
+  strokeWidth: 1.4,
+  opacity: 0.75,
   transition: EDGE_TRANSITION,
+  strokeLinecap: "round" as const,
+  filter: "drop-shadow(0 0 6px hsl(var(--muted-foreground) / 0.25))",
 };
 
 const MANUAL_EDGE_STYLE = {
-  stroke: "hsl(var(--primary) / 0.85)",
-  strokeWidth: 1.8,
-  opacity: 0.75,
+  stroke: "hsl(var(--primary) / 0.9)",
+  strokeWidth: 2.2,
+  opacity: 0.9,
   transition: EDGE_TRANSITION,
+  strokeLinecap: "round" as const,
+  filter: "drop-shadow(0 0 8px hsl(var(--primary) / 0.35))",
+};
+
+const PREVIEW_EDGE_STYLE = {
+  stroke: "hsl(var(--primary) / 0.65)",
+  strokeWidth: 2.2,
+  opacity: 0.85,
+  strokeDasharray: "6 6",
+  transition: EDGE_TRANSITION,
+  strokeLinecap: "round" as const,
 };
 
 const toManualEdgeState = (edges: MapManualEdge[]): ManualEdgeState[] => {
@@ -134,7 +176,7 @@ const buildManualEdge = (edge: ManualEdgeState): Edge => ({
   source: edge.sourceId,
   target: edge.targetId,
   type: "smoothstep",
-  animated: false,
+  animated: true,
   style: MANUAL_EDGE_STYLE,
   data: { kind: "manual" },
 });
@@ -265,13 +307,14 @@ const buildLayout = (interests: MapInterestNode[]) => {
   };
 };
 
-const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
+const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasProps) => {
   const { nodes: initialNodes, positionMap, newlyPositionedIds, shouldFitView } = useMemo(
-    () => buildLayout(interests),
-    [interests],
+    () => buildLayout(initialInterests),
+    [initialInterests],
   );
   const initialManualEdges = useMemo<ManualEdgeState[]>(() => toManualEdgeState(manualEdges), [manualEdges]);
-  const autoEdges = useMemo(() => buildAutoEdges(interests), [interests]);
+  const [interestNodes, setInterestNodes] = useState<MapInterestNode[]>(initialInterests);
+  const autoEdges = useMemo(() => buildAutoEdges(interestNodes), [interestNodes]);
   const initialEdges = useMemo(
     () => mergeEdges(autoEdges, initialManualEdges),
     [autoEdges, initialManualEdges],
@@ -285,6 +328,10 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pendingNodeId, setPendingNodeId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [addPendingId, setAddPendingId] = useState<string | null>(null);
+  const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
+  const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(
     null,
@@ -297,6 +344,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   const [edgePendingKey, setEdgePendingKey] = useState<string | null>(null);
   const reactFlow = useReactFlow();
   const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const hasFittedRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -318,6 +366,14 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     if (connectFromId) set.add(connectFromId);
     return set;
   }, [activeNodeId, connectFromId, selectedInterestIds]);
+  const presentInterestIds = useMemo(
+    () => interestNodes.map((interest) => interest.id),
+    [interestNodes],
+  );
+
+  useEffect(() => {
+    setInterestNodes(initialInterests);
+  }, [initialInterests]);
 
   useEffect(() => {
     if (!shouldFitView || hasFittedRef.current || nodes.length === 0) return;
@@ -335,6 +391,78 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setEdges(merged);
   }, [autoEdges, manualEdgesState, selectedEdgeId, setEdges]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("mapPanelOpen");
+    if (stored === "1") {
+      setIsPanelOpen(true);
+    } else if (stored === "0") {
+      setIsPanelOpen(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("mapPanelOpen", isPanelOpen ? "1" : "0");
+  }, [isPanelOpen]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let isCancelled = false;
+
+    const loadRecommendations = async () => {
+      setIsLoadingRecommendations(true);
+      setRecommendationsError(null);
+      try {
+        const params = new URLSearchParams();
+        if (selectedInterestIdsSorted.length > 0) {
+          params.set("ids", selectedInterestIdsSorted.join(","));
+        }
+        if (presentInterestIds.length > 0) {
+          params.set("present", presentInterestIds.join(","));
+        }
+
+        const query = params.toString();
+        const response = await fetch(
+          query ? `/api/map/recommendations?${query}` : "/api/map/recommendations",
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
+
+        const payload = (await response.json()) as {
+          recommendations?: RecommendationItem[];
+          error?: string;
+        };
+
+        if (isCancelled) return;
+
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error ?? "Не удалось загрузить рекомендации");
+        }
+
+        setRecommendations(payload.recommendations ?? []);
+      } catch (error) {
+        if (isCancelled || controller.signal.aborted) return;
+        const message =
+          error instanceof Error ? error.message : "Не удалось загрузить рекомендации";
+        setRecommendationsError(message);
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingRecommendations(false);
+        }
+      }
+    };
+
+    void loadRecommendations();
+
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
+  }, [presentInterestIds, selectedInterestIdsSorted]);
+
   const styledEdges = useMemo(
     () =>
       edges.map((edge) => {
@@ -350,20 +478,47 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
         const stroke = emphasized
           ? `hsl(var(--primary) / ${isManual ? 0.95 : 0.75})`
           : baseStyle.stroke;
+        const filter =
+          isManual && (emphasized || isEdgeSelected)
+            ? "drop-shadow(0 0 12px hsl(var(--primary) / 0.55))"
+            : baseStyle.filter;
 
         return {
           ...edge,
           type: "smoothstep",
-          animated: false,
+          animated: isManual,
           style: {
             ...baseStyle,
             strokeWidth,
             opacity,
             stroke,
+            filter,
           },
         };
       }),
     [edges, highlightNodeIds, selectedEdgeId],
+  );
+
+  const previewEdge = useMemo(() => {
+    if (!connectMode || !connectFromId) return null;
+    if (!activeNodeId || activeNodeId === connectFromId) return null;
+
+    return {
+      id: `preview-${connectFromId}-${activeNodeId}`,
+      source: connectFromId,
+      target: activeNodeId,
+      type: "smoothstep",
+      animated: true,
+      selectable: false,
+      focusable: false,
+      style: PREVIEW_EDGE_STYLE,
+      data: { kind: "preview" },
+    } satisfies Edge;
+  }, [activeNodeId, connectFromId, connectMode]);
+
+  const renderedEdges = useMemo(
+    () => (previewEdge ? [...styledEdges, previewEdge] : styledEdges),
+    [previewEdge, styledEdges],
   );
 
   const autoSavePayload = useMemo(
@@ -448,17 +603,36 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     () =>
       nodes.map((node) => ({
         ...node,
-        selected: selectedIds.has(node.id),
+        selected: selectedIds.has(node.id) || connectFromId === node.id,
         data: {
           ...node.data,
-          isActive: activeNodeId === node.id,
-          isSelected: selectedIds.has(node.id),
+          isActive: activeNodeId === node.id || connectFromId === node.id,
+          isSelected: selectedIds.has(node.id) || connectFromId === node.id,
           isMultiSelected: selectedIds.size > 1 && selectedIds.has(node.id),
           isDragging: draggingNodeId === node.id,
+          isConnectSource: connectFromId === node.id,
+          isConnectTarget:
+            connectMode && Boolean(connectFromId) && node.id === activeNodeId && node.id !== connectFromId,
+          isPreviewTarget:
+            connectMode && Boolean(connectFromId) && node.id === activeNodeId && node.id !== connectFromId,
         },
       })),
-    [activeNodeId, draggingNodeId, nodes, selectedIds],
+    [activeNodeId, connectFromId, connectMode, draggingNodeId, nodes, selectedIds],
   );
+
+  const getCanvasCenter = useCallback(() => {
+    if (typeof window === "undefined") return { x: 0, y: 0 };
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    const centerPoint = bounds
+      ? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+      : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
+    try {
+      return reactFlow.screenToFlowPosition(centerPoint);
+    } catch {
+      return { x: 0, y: 0 };
+    }
+  }, [reactFlow]);
 
   const persistPosition = useCallback(
     async (interestId: string, position: { x: number; y: number }) => {
@@ -512,9 +686,84 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setDraggingNodeId(node.id);
   }, []);
 
+  const handleAddInterestNode = useCallback(
+    async (interest: RecommendationItem) => {
+      if (addPendingId) return;
+      if (interestNodes.some((item) => item.id === interest.id)) {
+        setToast({ message: "Узел уже добавлен", variant: "success" });
+        return;
+      }
+
+      setAddPendingId(interest.id);
+      const jitter = () => (Math.random() - 0.5) * 140;
+      const basePosition = getCanvasCenter();
+      const nextPosition = { x: basePosition.x + jitter(), y: basePosition.y + jitter() };
+
+      const nextNode: MapInterestNode = {
+        id: interest.id,
+        title: interest.title,
+        cluster: interest.cluster,
+        position: nextPosition,
+      };
+
+      setInterestNodes((prev) => [...prev, nextNode]);
+      setNodes((prev) => [
+        ...prev,
+        {
+          id: interest.id,
+          type: "interest",
+          position: nextPosition,
+          data: {
+            title: interest.title,
+            cluster: interest.cluster,
+            clusterLabel: interest.clusterLabel,
+          },
+        },
+      ]);
+      setLastSavedPositions((prev) => {
+        const next = new Map(prev);
+        next.set(interest.id, nextPosition);
+        return next;
+      });
+      setRecommendations((prev) => prev.filter((item) => item.id !== interest.id));
+      setRecommendationsError(null);
+
+      const { error } = await addUserInterestAction(interest.id);
+
+      if (error) {
+        setRecommendationsError(error);
+        setInterestNodes((prev) => prev.filter((item) => item.id !== interest.id));
+        setNodes((prev) => prev.filter((node) => node.id !== interest.id));
+        setLastSavedPositions((prev) => {
+          const next = new Map(prev);
+          next.delete(interest.id);
+          return next;
+        });
+        setRecommendations((prev) => [interest, ...prev]);
+        setAddPendingId(null);
+        return;
+      }
+
+      const { error: positionError } = await saveMapPosition({
+        interestId: interest.id,
+        x: nextPosition.x,
+        y: nextPosition.y,
+      });
+
+      if (positionError) {
+        setRecommendationsError(positionError);
+      } else {
+        setToast({ message: "Узел добавлен", variant: "success" });
+      }
+
+      setAddPendingId(null);
+    },
+    [addPendingId, getCanvasCenter, interestNodes],
+  );
+
   const nodeTitleMap = useMemo(
-    () => new Map(interests.map((interest) => [interest.id, interest.title])),
-    [interests],
+    () => new Map(interestNodes.map((interest) => [interest.id, interest.title])),
+    [interestNodes],
   );
 
   const manualEdgePairs = useMemo(
@@ -625,7 +874,11 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
   );
 
   const handlePaneClick = useCallback(() => {
-    if (connectMode) return;
+    if (connectMode) {
+      setConnectFromId(null);
+      setActiveNodeId(null);
+      return;
+    }
     clearSelection();
     setSelectedEdgeId(null);
     setActiveNodeId(null);
@@ -682,7 +935,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     setDraggingNodeId(null);
     setSelectedIds(new Set());
 
-    const nextLayout = computeClusterLayout(interests);
+    const nextLayout = computeClusterLayout(interestNodes);
     const payload = Array.from(nextLayout.entries()).map(([interestId, position]) => ({
       interestId,
       x: position.x,
@@ -715,7 +968,7 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
     } finally {
       setIsResettingLayout(false);
     }
-  }, [interests, reactFlow, setNodes]);
+  }, [interestNodes, reactFlow, setNodes]);
 
   const handleZoomIn = useCallback(() => {
     const current = reactFlow.getZoom();
@@ -782,9 +1035,9 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
 
   const connectHint = connectMode
     ? connectFromId
-      ? `Выбрано: «${nodeTitleMap.get(connectFromId) ?? "интерес"}». Выберите второй интерес.`
-      : "Соединить: выберите 2 интереса, чтобы создать связь."
-    : "Нажмите «Соединить», чтобы добавить ручные связи.";
+      ? `Выбрано: «${nodeTitleMap.get(connectFromId) ?? "интерес"}». Наведите или нажмите второй узел.`
+      : "Соединить: выберите 2 интереса, наведите — увидите предварительную линию."
+    : "Нажмите «Соединить», чтобы добавить ручные связи и подсветку путей.";
 
   const selectionStatus = selectionMode
     ? "Режим выбора включен: тапайте или кликайте, чтобы отметить несколько узлов."
@@ -802,25 +1055,25 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
 
   const edgeStatus = edgePendingKey ? "Сохраняем связь..." : positionStatus;
 
-  if (interests.length === 0) {
+  if (initialInterests.length === 0) {
     return <EmptyMapState />;
   }
 
   const togglePanel = () => setIsPanelOpen((prev) => !prev);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_20px_60px_-35px_rgba(0,0,0,0.45)]">
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border/80 bg-[radial-gradient(circle_at_20%_15%,rgba(129,140,248,0.16),rgba(15,23,42,0.65)),radial-gradient(circle_at_80%_85%,rgba(56,189,248,0.12),rgba(15,23,42,0.7))] shadow-[0_20px_70px_-35px_rgba(0,0,0,0.6)]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_35%_20%,rgba(124,58,237,0.12),transparent_45%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_70%,rgba(79,70,229,0.08),transparent_50%)]" />
-      <div className="relative h-full min-h-[520px] w-full">
+      <div ref={canvasRef} className="relative h-full min-h-[520px] w-full">
         <ReactFlow
           nodes={displayedNodes}
-          edges={styledEdges}
+          edges={renderedEdges}
           minZoom={0.4}
           maxZoom={1.6}
           nodeTypes={nodeTypes}
           panOnScroll
-          selectionOnDrag={selectionMode}
+          selectionOnDrag={selectionMode && !connectMode}
           panOnDrag={!selectionMode}
           deleteKeyCode={null}
           onNodesChange={handleNodesChange}
@@ -833,13 +1086,15 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
           onPaneMouseLeave={handlePaneMouseLeave}
           onNodeMouseEnter={handleNodeMouseEnter}
           onNodeMouseLeave={handleNodeMouseLeave}
-          className={cn("bg-gradient-to-b from-background via-background/92 to-background/80")}
+          className={cn(
+            "bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.03),transparent_35%),radial-gradient(circle_at_20%_80%,rgba(255,255,255,0.03),transparent_35%)]",
+          )}
         >
           <Background
             variant={BackgroundVariant.Dots}
             gap={20}
-            size={1.4}
-            color="rgba(255,255,255,0.06)"
+            size={1.6}
+            color="rgba(255,255,255,0.08)"
           />
 
           <Panel
@@ -981,12 +1236,64 @@ const MapCanvasInner = ({ interests, manualEdges }: MapCanvasProps) => {
                     {edgeError ? <p className="text-destructive">{edgeError}</p> : null}
                     {selectionHint ? <p className="text-primary">{selectionHint}</p> : null}
                   </div>
+                  <div className="mt-4 space-y-3 rounded-2xl border border-border/70 bg-card/70 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                        <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+                        <span>Рекомендации</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">
+                        {isLoadingRecommendations ? "Обновляем..." : "До 20 подсказок"}
+                      </span>
+                    </div>
+                    {recommendationsError ? (
+                      <p className="text-[11px] text-destructive">{recommendationsError}</p>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2">
+                      {recommendations.length === 0 && !isLoadingRecommendations ? (
+                        <p className="text-[11px] text-muted-foreground">
+                          Пока нечего предложить. Отметьте пару интересов или наведите на узлы.
+                        </p>
+                      ) : null}
+                      {recommendations.map((item) => (
+                        <div
+                          key={item.id}
+                          className="group flex min-w-[200px] flex-1 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/80 px-3 py-2 shadow-inner shadow-black/5 transition hover:border-primary/40 hover:shadow-primary/10"
+                        >
+                          <div className="space-y-1 pr-2">
+                            <p className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
+                              {item.title}
+                            </p>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">
+                              <Sparkles className="h-3 w-3" aria-hidden />
+                              {item.clusterLabel}
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="primary"
+                            className="h-9 w-9 shrink-0 rounded-full"
+                            disabled={addPendingId === item.id}
+                            onClick={() => void handleAddInterestNode(item)}
+                          >
+                            {addPendingId === item.id ? (
+                              <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden />
+                            ) : (
+                              <Plus className="h-4 w-4" aria-hidden />
+                            )}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   <div className="mt-3 grid gap-1 rounded-xl border border-border/70 bg-card/70 px-3 py-2 text-[11px] text-muted-foreground">
                     <div className="flex items-center gap-2 font-semibold text-foreground">
                       <CircleHelp className="h-3.5 w-3.5 text-primary" aria-hidden />
                       <span>Быстрые подсказки</span>
                     </div>
                     <p>Клик — выбрать. Shift/Ctrl — мульти.</p>
+                    <p>В режиме «Соединить» наведите на второй узел — линия покажет связку, клик её сохранит.</p>
                     <p>Перетяни узел — позиция сохранится. Фит-вью внизу слева.</p>
                     <p>На мобильном включи «Режим выбора», чтобы отметить несколько.</p>
                   </div>
