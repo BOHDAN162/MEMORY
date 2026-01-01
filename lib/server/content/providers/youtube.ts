@@ -94,18 +94,39 @@ const createAbortController = (timeoutMs: number): { signal: AbortSignal; cleanu
   };
 };
 
+const buildYouTubeError = async (response: Response): Promise<string> => {
+  let message: string | null = null;
+
+  try {
+    const body = (await response.json()) as
+      | { error?: { message?: string; status?: string; errors?: Array<{ message?: string }> }; message?: string }
+      | undefined;
+
+    message =
+      body?.error?.message ??
+      body?.message ??
+      body?.error?.errors?.find((err) => err?.message)?.message ??
+      null;
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[youtube] failed to parse error response", (error as Error)?.message ?? error);
+    }
+  }
+
+  const statusText = response.statusText ? ` ${response.statusText}` : "";
+  if (message) return `YouTube API error ${response.status}${statusText}: ${message}`;
+  return `YouTube API error ${response.status}${statusText}`;
+};
+
 const fetchYouTube = async (
   query: string,
   limit: number,
   locale: string,
-): Promise<YouTubeSearchResponse | null> => {
+): Promise<{ items: YouTubeSearchItem[]; error: string | null }> => {
   const apiKey = process.env.YOUTUBE_API_KEY;
 
   if (!apiKey) {
-    if (process.env.NODE_ENV !== "production") {
-      console.error("[youtube] YOUTUBE_API_KEY is not set");
-    }
-    return null;
+    return { items: [], error: "YOUTUBE_API_KEY is not set" };
   }
 
   const params = new URLSearchParams({
@@ -132,23 +153,22 @@ const fetchYouTube = async (
       cache: "no-store",
     });
 
-    cleanup();
-
     if (!response.ok) {
-      if (process.env.NODE_ENV !== "production") {
-        console.error("[youtube] request failed", response.status, response.statusText);
-      }
-      return null;
+      const error = await buildYouTubeError(response);
+      return { items: [], error };
     }
 
     const payload = (await response.json()) as YouTubeSearchResponse;
-    return payload;
+    return { items: payload.items ?? [], error: null };
   } catch (error) {
+    const message = (error as Error)?.message ?? String(error);
+    const prefix =
+      (error as { name?: string })?.name === "AbortError"
+        ? "YouTube request aborted"
+        : "YouTube request failed";
+    return { items: [], error: `${prefix}: ${message}` };
+  } finally {
     cleanup();
-    if (process.env.NODE_ENV !== "production") {
-      console.error("[youtube] fetch error", (error as Error)?.message ?? error);
-    }
-    return null;
   }
 };
 
@@ -197,6 +217,10 @@ const youtubeProvider: ContentProvider = {
   id: "youtube",
   ttlSeconds: 60 * 60 * 12,
   async fetch(req: ProviderRequest): Promise<ProviderFetchResult> {
+    if (!process.env.YOUTUBE_API_KEY) {
+      return { items: [], error: "YOUTUBE_API_KEY is not set" };
+    }
+
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
       if (process.env.NODE_ENV !== "production") {
@@ -221,11 +245,17 @@ const youtubeProvider: ContentProvider = {
     const locale = req.locale ?? "ru";
 
     const byVideoId = new Map<string, ContentItem>();
+    let providerError: string | null = null;
 
     for (const interest of interests) {
       const query = buildQuery(interest);
       const response = await fetchYouTube(query, perInterestLimit, locale);
-      const items = response?.items ?? [];
+
+      if (response.error) {
+        providerError = providerError ?? response.error;
+      }
+
+      const items = response.items;
 
       for (const rawItem of items) {
         const normalized = normalizeItem(rawItem, interest, query);
@@ -258,7 +288,7 @@ const youtubeProvider: ContentProvider = {
       console.info("[youtube] returning items", { count: items.length });
     }
 
-    return { items, error: null };
+    return { items, error: providerError };
   },
 };
 
