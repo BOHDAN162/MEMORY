@@ -62,7 +62,7 @@ export const AppShell = ({ children, isAuthenticated = false }: AppShellProps) =
           </div>
         </header>
         <main className="flex-1 overflow-y-auto bg-background px-4 py-6 transition-colors duration-300 sm:px-8">
-          <div className="mx-auto flex max-w-6xl flex-col gap-6">
+          <div className="mx-auto flex w-full flex-col gap-6">
             {children}
           </div>
         </main>
