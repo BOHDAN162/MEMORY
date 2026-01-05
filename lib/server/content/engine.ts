@@ -53,6 +53,7 @@ export type ContentEngineDebug = {
     avgScore: number | null;
     latencyMs: number;
     usedModel: string | null;
+    mode?: string | null;
     error?: string | null;
   };
   diversity?: {
