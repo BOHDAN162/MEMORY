@@ -34,9 +34,15 @@ export type ContentEngineDebug = {
     error?: string | null;
   };
   semantic?: { topK: number; latencyMs: number; usedModel: string | null; cacheHit?: boolean };
-  llm?: { filteredAd: number; filteredOfftopic: number; avgScore: number | null; latencyMs: number; usedModel: string | null; error?: string | null };
-  diversity?: { droppedByProvider: number; droppedByChannel: number; enforcedProviders: number };
-  fallback?: { reason: string };
+  llm?: {
+    filteredAd: number;
+    filteredOfftopic: number;
+    avgScore: number | null;
+    latencyMs: number;
+    usedModel: string | null;
+    mode?: "llm" | "heuristic" | "fallback";
+    error?: string | null;
+  };
 };
 
 const DEFAULT_TOP_K = 60;
