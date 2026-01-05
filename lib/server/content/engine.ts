@@ -700,6 +700,7 @@ export const runContentEngine = async (params: {
         : null,
     latencyMs: Date.now() - rerankStart,
     usedModel: llmDebug.usedModel,
+    mode: llmDebug.mode,
     error: llmDebug.error,
   };
 
