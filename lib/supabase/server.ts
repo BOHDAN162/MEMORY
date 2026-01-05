@@ -3,7 +3,7 @@ import "server-only";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient, Session } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { getSupabaseCredentials } from "@/lib/config/env";
+import { getSupabaseCredentials, getSupabaseServiceRoleKey } from "@/lib/config/env";
 
 export const createSupabaseServerClient = async (): Promise<SupabaseClient | null> => {
   const credentials = getSupabaseCredentials();
@@ -31,6 +31,23 @@ export const createSupabaseServerClient = async (): Promise<SupabaseClient | nul
           // noop - cookies() is readonly in server components.
         }
       },
+    },
+  });
+};
+
+export const createSupabaseServiceRoleClient = async (): Promise<SupabaseClient | null> => {
+  const credentials = getSupabaseCredentials();
+  const serviceKey = getSupabaseServiceRoleKey();
+
+  if (!credentials || !serviceKey) {
+    return null;
+  }
+
+  return createServerClient(credentials.url, serviceKey, {
+    cookies: {
+      get: () => undefined,
+      set: () => undefined,
+      remove: () => undefined,
     },
   });
 };

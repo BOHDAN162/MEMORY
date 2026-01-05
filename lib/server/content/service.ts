@@ -1,14 +1,7 @@
 import "server-only";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getCached, setCached, stableHash } from "./cache";
-import { getProviders } from "./providers";
-import type {
-  ContentItem,
-  ContentProviderId,
-  ProviderFetchResult,
-  ProviderRequest,
-} from "./types";
+import { runContentEngine, type ContentEngineDebug } from "./engine";
+import type { ContentItem, ContentProviderId } from "./types";
 
 type GetContentParams = {
   providerIds?: ContentProviderId[];
@@ -18,211 +11,22 @@ type GetContentParams = {
   mode?: "selected" | "all";
 };
 
-type ProviderDebugInfo = {
-  count: number;
-  cacheHit: boolean;
-  ms: number;
-  error: string | null;
-};
-
-type GetContentDebug = {
-  cacheHits: Partial<Record<ContentProviderId, boolean>>;
-  usedProviders: ContentProviderId[];
-  hashes: Partial<Record<ContentProviderId, string>>;
-  providers: Partial<Record<ContentProviderId, ProviderDebugInfo>>;
-};
+export type GetContentDebug = ContentEngineDebug;
 
 export const getContent = async (
   params: GetContentParams,
 ): Promise<{ items: ContentItem[]; debug: GetContentDebug }> => {
-  const supabase = await createSupabaseServerClient();
   const interestIdsSorted = Array.from(new Set(params.interestIds.filter(Boolean))).sort(
     (a, b) => a.localeCompare(b),
   );
   const effectiveLimit = Math.max(1, Math.min(params.limit ?? 20, 20));
   const effectiveLocale = params.locale ?? "ru";
 
-  const providers = getProviders(params.providerIds);
-  const debug: GetContentDebug = {
-    cacheHits: {},
-    usedProviders: providers.map((provider) => provider.id),
-    hashes: {},
-    providers: {},
-  };
-
-  const itemsWithOrder: Array<{ item: ContentItem; order: number }> = [];
-
-  for (const provider of providers) {
-    const providerStatus: ProviderDebugInfo = {
-      count: 0,
-      cacheHit: false,
-      ms: 0,
-      error: null,
-    };
-    const startedAt = Date.now();
-
-    const request: ProviderRequest = {
-      interestIds: interestIdsSorted,
-      limit: effectiveLimit,
-      locale: effectiveLocale,
-      mode: params.mode ?? "all",
-    };
-
-    const defaultHashInput =
-      provider.id === "youtube"
-        ? JSON.stringify({
-            provider: "youtube",
-            interestIds: interestIdsSorted,
-            limit: effectiveLimit,
-            locale: effectiveLocale,
-            mode: request.mode,
-          })
-        : {
-            v: 1,
-            provider: provider.id,
-            interestIds: interestIdsSorted,
-            limit: effectiveLimit ?? null,
-            locale: effectiveLocale ?? null,
-            mode: request.mode ?? null,
-          };
-
-    let hashInput: object | string = defaultHashInput;
-
-    if (provider.getHashInput) {
-      try {
-        const customHashInput = await provider.getHashInput(request);
-        if (customHashInput) {
-          hashInput = customHashInput as object | string;
-        }
-      } catch (error) {
-        if (process.env.NODE_ENV !== "production") {
-          console.error(`[content] provider ${provider.id} getHashInput failed`, error);
-        }
-      }
-    }
-
-    const hash = stableHash(hashInput);
-
-    debug.hashes[provider.id] = hash;
-
-    const cached = await getCached(supabase, provider.id, hash, provider.ttlSeconds);
-
-    if (cached) {
-      debug.cacheHits[provider.id] = true;
-      providerStatus.cacheHit = true;
-      providerStatus.count = cached.length;
-      providerStatus.ms = Date.now() - startedAt;
-      if (process.env.NODE_ENV !== "production") {
-        console.info(`[content] cache hit for ${provider.id}`, {
-          hash,
-          count: cached.length,
-        });
-      }
-      const baseOrder = itemsWithOrder.length;
-      cached.forEach((item, index) => itemsWithOrder.push({ item, order: baseOrder + index }));
-      debug.providers[provider.id] = providerStatus;
-      continue;
-    }
-
-    debug.cacheHits[provider.id] = false;
-
-    let providerItems: ContentItem[] = [];
-    let providerError: string | null = null;
-
-    try {
-      const result = (await provider.fetch(request)) as ProviderFetchResult | ContentItem[];
-      const normalizedResult = Array.isArray(result)
-        ? { items: result, error: null }
-        : { items: result.items ?? [], error: result.error ?? null };
-      providerItems = normalizedResult.items;
-      providerError = normalizedResult.error;
-    } catch (error) {
-      providerError = (error as Error)?.message ?? "Unknown provider error";
-      if (process.env.NODE_ENV !== "production") {
-        console.error(`[content] provider ${provider.id} failed`, error);
-      }
-    }
-
-    providerStatus.ms = Date.now() - startedAt;
-    providerStatus.count = providerItems.length;
-    providerStatus.error = providerError;
-    debug.providers[provider.id] = providerStatus;
-
-    if (process.env.NODE_ENV !== "production") {
-      console.info(
-        `[content] fetched ${providerItems.length} items from ${provider.id}`,
-        providerError ? { hash, error: providerError } : { hash },
-      );
-    }
-    if (!providerError) {
-      await setCached(supabase, provider.id, hash, providerItems);
-    }
-    const baseOrder = itemsWithOrder.length;
-    providerItems.forEach((item, index) => itemsWithOrder.push({ item, order: baseOrder + index }));
-  }
-
-  const items = itemsWithOrder
-    .sort((a, b) => {
-      const aScore = a.item.score;
-      const bScore = b.item.score;
-
-      if (aScore !== null && aScore !== undefined && bScore !== null && bScore !== undefined) {
-        if (aScore === bScore) {
-          return a.order - b.order;
-        }
-        return bScore - aScore;
-      }
-
-      if (aScore !== null && aScore !== undefined) return -1;
-      if (bScore !== null && bScore !== undefined) return 1;
-      return a.order - b.order;
-    })
-    .map(({ item }) => item);
-
-  const interestIdSet = new Set<string>();
-  items.forEach((item) => {
-    item.interestIds.forEach((interestId) => {
-      if (interestId) {
-        interestIdSet.add(interestId);
-      }
-    });
+  return runContentEngine({
+    providerIds: params.providerIds,
+    interestIds: interestIdsSorted,
+    limit: effectiveLimit,
+    locale: effectiveLocale,
+    mode: params.mode ?? "all",
   });
-
-  const interestTitleMap = new Map<string, string>();
-
-  if (supabase && interestIdSet.size > 0) {
-    const { data, error } = await supabase
-      .from("interests")
-      .select("id, title")
-      .in("id", Array.from(interestIdSet));
-
-    if (!error && Array.isArray(data)) {
-      data.forEach((row) => {
-        const interestId = (row as { id?: string }).id;
-        const title = (row as { title?: string }).title;
-        if (interestId && title) {
-          interestTitleMap.set(interestId, title);
-        }
-      });
-    } else if (process.env.NODE_ENV !== "production") {
-      console.warn("[content] failed to load interest titles", error?.message ?? error);
-    }
-  }
-
-  const enrichedItems = items.map((item) => {
-    const interestTitles = item.interestIds
-      .map((interestId) => interestTitleMap.get(interestId))
-      .filter((title): title is string => Boolean(title));
-
-    if (interestTitles.length === 0) {
-      return item;
-    }
-
-    return {
-      ...item,
-      interestTitles,
-    };
-  });
-
-  return { items: enrichedItems, debug };
 };

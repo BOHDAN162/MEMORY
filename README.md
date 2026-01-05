@@ -39,3 +39,12 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Content engine environment keys
+
+- `SUPABASE_SERVICE_ROLE_KEY` — required for server-side ingestion and embeddings storage (kept on the server only).
+- `EMBEDDINGS_API_KEY` or `OPENAI_API_KEY` — enables semantic embeddings; if missing the engine falls back to provider-only results.
+- `LLM_API_KEY` (or reuse `OPENAI_API_KEY`) — powers LLM reranking; if missing heuristics are used instead.
+- `YOUTUBE_API_KEY` — improves YouTube fetch quality; absence is handled gracefully.
+
+When any of the AI keys are missing or rate-limited, `/content` still works via the legacy provider pipeline and the debug panel notes the fallback reason.

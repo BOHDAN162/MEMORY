@@ -55,6 +55,24 @@ export type ContentDebugInfo = {
       }
     >
   >;
+  ingestion?: { upserted?: number; updated?: number; error?: string | null };
+  embeddings?: {
+    interestMissing?: number;
+    contentMissing?: number;
+    usedModel?: string | null;
+    error?: string | null;
+  };
+  semantic?: { topK?: number; latencyMs?: number; usedModel?: string | null; cacheHit?: boolean };
+  llm?: {
+    filteredAd?: number;
+    filteredOfftopic?: number;
+    avgScore?: number | null;
+    latencyMs?: number;
+    usedModel?: string | null;
+    error?: string | null;
+  };
+  diversity?: { droppedByProvider?: number; droppedByChannel?: number; enforcedProviders?: number };
+  fallback?: { reason?: string };
 };
 
 type SortOption = "relevance" | "new" | "random" | "title";
