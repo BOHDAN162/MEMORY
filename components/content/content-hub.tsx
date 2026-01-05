@@ -69,6 +69,7 @@ export type ContentDebugInfo = {
     avgScore?: number | null;
     latencyMs?: number;
     usedModel?: string | null;
+    mode?: string | null;
     error?: string | null;
   };
   diversity?: { droppedByProvider?: number; droppedByChannel?: number; enforcedProviders?: number };
@@ -81,7 +82,6 @@ type ContentHubProps = {
   items: NormalizedContentItem[];
   selectionMode: "selected" | "all";
   interestIds: string[];
-  debug?: ContentDebugInfo | null;
   debugEnabled?: boolean;
   interestsError?: string | null;
   availableProviders: ContentProviderId[];
@@ -149,7 +149,6 @@ const sortItems = (items: NormalizedContentItem[], sort: SortOption, seed: numbe
 
 const ContentHub = ({
   items,
-  debug,
   debugEnabled = false,
   interestsError,
   availableProviders,
@@ -230,17 +229,6 @@ const ContentHub = ({
       {!interestsError && sortedItems.length > 0 && (
         <ContentGrid items={sortedItems} activeType={activeType} debugEnabled={debugEnabled} />
       )}
-
-      {debugEnabled && debug ? (
-        <details className="rounded-2xl border border-dashed border-border bg-muted/40 p-4 text-sm">
-          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-            Debug
-          </summary>
-          <pre className="mt-3 overflow-auto text-xs">
-            {JSON.stringify(debug, null, 2)}
-          </pre>
-        </details>
-      ) : null}
     </div>
   );
 };
