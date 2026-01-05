@@ -1,18 +1,21 @@
 import Link from "next/link";
 import ContentHub, { type ContentDebugInfo, type NormalizedContentItem } from "@/components/content/content-hub";
+import ContentDebugPanel from "@/components/content/content-debug-panel";
 import { buttonVariants } from "@/components/ui/button";
 import { buildWhy } from "@/lib/content/why";
 import { getContent } from "@/lib/server/content/service";
 import type { ContentItem, ContentProviderId, ContentType } from "@/lib/server/content/types";
 import { getUserInterests } from "@/lib/server/interests";
 
+type ContentPageSearchParams = {
+  ids?: string | string[];
+  interests?: string | string[];
+  mode?: string | string[];
+  debug?: string | string[];
+};
+
 type ContentPageProps = {
-  searchParams?: {
-    ids?: string | string[];
-    interests?: string | string[];
-    mode?: string | string[];
-    debug?: string | string[];
-  };
+  searchParams?: ContentPageSearchParams | Promise<ContentPageSearchParams>;
 };
 
 const parseIds = (param?: string | string[]): string[] => {
@@ -25,15 +28,17 @@ const parseIds = (param?: string | string[]): string[] => {
 };
 
 const ContentPage = async ({ searchParams }: ContentPageProps) => {
-  const modeParamRaw = searchParams?.mode;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const modeParamRaw = resolvedSearchParams?.mode;
   const modeParam = Array.isArray(modeParamRaw) ? modeParamRaw[0] : modeParamRaw;
   const selectionMode = modeParam === "selected" ? "selected" : "all";
-  const idsParam = parseIds(searchParams?.ids);
-  const interestsParam = parseIds(searchParams?.interests);
+  const idsParam = parseIds(resolvedSearchParams?.ids);
+  const interestsParam = parseIds(resolvedSearchParams?.interests);
   const idsFromQuery = idsParam.length > 0 ? idsParam : interestsParam;
-  const debugParamRaw = searchParams?.debug;
+  const debugParamRaw = resolvedSearchParams?.debug;
   const debugParam = Array.isArray(debugParamRaw) ? debugParamRaw[0] : debugParamRaw;
-  const debugMode = debugParam === "1";
+  const debugUiEnabled = process.env.NODE_ENV !== "production";
+  const debugMode = debugUiEnabled && debugParam === "1";
 
   const providerIds: ContentProviderId[] = ["youtube", "books", "articles", "telegram", "prompts"];
   let interestIds: string[] = [];
@@ -165,7 +170,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   });
 
   return (
-    <section className="space-y-4">
+    <section className="relative space-y-4">
       <div className="flex flex-col gap-2">
         <p className="text-xs uppercase tracking-[0.24em] text-primary">Контент-хаб</p>
         <h1 className="text-3xl font-bold text-foreground">Подборка контента</h1>
@@ -178,11 +183,14 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         items={normalizedItems}
         selectionMode={selectionMode}
         interestIds={interestIds}
-        debug={debug}
         debugEnabled={debugMode}
         interestsError={interestsError}
         availableProviders={providerIds}
       />
+
+      {debugUiEnabled ? (
+        <ContentDebugPanel debug={debug} items={normalizedItems} className="absolute right-0 top-0" />
+      ) : null}
     </section>
   );
 };
