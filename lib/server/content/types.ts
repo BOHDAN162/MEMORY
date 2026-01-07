@@ -28,6 +28,7 @@ export interface ProviderRequest {
 export interface ProviderFetchResult {
   items: ContentItem[];
   error?: string | null;
+  debug?: Record<string, unknown>;
 }
 
 export interface ContentProvider {
