@@ -46,8 +46,9 @@ const YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/search";
 const DEFAULT_TOTAL_LIMIT = 20;
 
 // Candidates pool (for semantic ranking)
-const PER_INTEREST_CANDIDATES = 20;     // сколько брать на интерес
-const MAX_TOTAL_CANDIDATES = 120;       // общий лимит кандидатов, чтобы не взорвать embeddings
+const MAX_INTERESTS_FOR_FETCH = 5;
+const PER_INTEREST_CANDIDATES = 10;     // сколько брать на интерес
+const MAX_TOTAL_CANDIDATES = 60;        // общий лимит кандидатов, чтобы не взорвать embeddings
 
 // Timeout
 const TIMEOUT_MS = 12_000;
@@ -61,6 +62,11 @@ const EMBEDDING_BATCH_SIZE = 32;
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 type CachedEmbedding = { v: number[]; exp: number };
 const EMB_CACHE = new Map<string, CachedEmbedding>();
+
+type YTCacheEntry = { expiresAt: number; items: YouTubeSearchItem[]; status: number };
+const YT_CACHE = new Map<string, YTCacheEntry>();
+const YT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const YT_CACHE_MAX_SIZE = 200;
 
 const pickThumbnail = (item: YouTubeSearchItem): string | null => {
   const thumbs = item.snippet?.thumbnails;
@@ -87,6 +93,8 @@ const safeTrim = (s: string, max: number) => (s.length > max ? s.slice(0, max) :
 
 const normalizeWhitespace = (s: string) => s.replace(/\s+/g, " ").trim();
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const extractVideoId = (item: ContentItem): string | null => {
   if (!item.id) return null;
   if (item.id.startsWith("youtube:")) return item.id.slice("youtube:".length);
@@ -108,6 +116,28 @@ const setCachedEmbedding = (key: string, vector: number[]) => {
     v: vector,
     exp: Date.now() + CACHE_TTL_MS,
   });
+};
+
+const getCachedYouTube = (key: string): YTCacheEntry | null => {
+  const cached = YT_CACHE.get(key);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    YT_CACHE.delete(key);
+    return null;
+  }
+  return cached;
+};
+
+const setCachedYouTube = (key: string, entry: YTCacheEntry) => {
+  if (YT_CACHE.size > YT_CACHE_MAX_SIZE) {
+    const now = Date.now();
+    for (const [cacheKey, value] of YT_CACHE.entries()) {
+      if (value.expiresAt <= now) {
+        YT_CACHE.delete(cacheKey);
+      }
+    }
+  }
+  YT_CACHE.set(key, entry);
 };
 
 const chunk = <T>(items: T[], size: number): T[][] => {
@@ -161,11 +191,20 @@ const fetchYouTube = async (
   error: string | null;
   status?: number;
   strictEmptyFallbackUsed: boolean;
+  cacheHit: boolean;
+  cacheKey?: string;
 }> => {
   const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) return { items: [], error: "YOUTUBE_API_KEY is not set", strictEmptyFallbackUsed: false };
+  if (!apiKey) {
+    return {
+      items: [],
+      error: "YOUTUBE_API_KEY is not set",
+      strictEmptyFallbackUsed: false,
+      cacheHit: false,
+    };
+  }
 
-  const doRequest = async (mode: "strict" | "loose") => {
+  const doRequest = async (mode: "strict" | "loose", allowRetry = true) => {
     const params = new URLSearchParams({
       part: "snippet",
       type: "video",
@@ -183,6 +222,26 @@ const fetchYouTube = async (
       params.set("videoEmbeddable", "true");
     }
 
+    const cacheKey = [
+      "yt",
+      mode,
+      locale,
+      String(limit),
+      normalizeWhitespace(query),
+    ].join("|");
+
+    const cached = getCachedYouTube(cacheKey);
+    if (cached) {
+      return {
+        items: cached.items,
+        error: null,
+        status: cached.status,
+        strictEmptyFallbackUsed: false,
+        cacheHit: true,
+        cacheKey,
+      };
+    }
+
     const { signal, cleanup } = createAbortController(TIMEOUT_MS);
 
     try {
@@ -196,6 +255,10 @@ const fetchYouTube = async (
       cleanup();
 
       if (!response.ok) {
+        if (response.status === 429 && allowRetry) {
+          await sleep(500 + Math.random() * 300);
+          return doRequest(mode, false);
+        }
         let body = "";
         try {
           body = await response.text();
@@ -205,18 +268,34 @@ const fetchYouTube = async (
           error: `YouTube request failed: ${response.status} ${response.statusText}${body ? ` | ${body.slice(0, 200)}` : ""}`,
           status: response.status,
           strictEmptyFallbackUsed: false,
+          cacheHit: false,
+          cacheKey,
         };
       }
 
       const payload = (await response.json()) as YouTubeSearchResponse;
       const items = Array.isArray(payload.items) ? payload.items : [];
-      return { items, error: null, status: response.status, strictEmptyFallbackUsed: false };
+      setCachedYouTube(cacheKey, {
+        items,
+        status: response.status,
+        expiresAt: Date.now() + YT_CACHE_TTL_MS,
+      });
+      return {
+        items,
+        error: null,
+        status: response.status,
+        strictEmptyFallbackUsed: false,
+        cacheHit: false,
+        cacheKey,
+      };
     } catch (error) {
       cleanup();
       return {
         items: [],
         error: `YouTube fetch error: ${(error as Error)?.message ?? String(error)}`,
         strictEmptyFallbackUsed: false,
+        cacheHit: false,
+        cacheKey,
       };
     }
   };
@@ -234,11 +313,14 @@ const fetchYouTube = async (
         error: second.error,
         status: second.status,
         strictEmptyFallbackUsed: true,
+        cacheHit: first.cacheHit || second.cacheHit,
+        cacheKey: second.cacheKey,
       };
     }
     return {
       ...second,
       strictEmptyFallbackUsed: true,
+      cacheHit: first.cacheHit || second.cacheHit,
     };
   }
 
@@ -347,12 +429,16 @@ const youtubeProvider: ContentProvider = {
     const locale = req.locale ?? "ru";
     const debugInfo = {
       candidatesTotal: 0,
+      usedInterestsForFetch: 0,
       interestsFetched: 0,
       strictEmptyFallbackUsed: false,
-      globalFallbackUsed: false,
+      fallbackUsed: { used: false, reason: "" },
       embeddedCount: 0,
       topScores: [] as number[],
       errors: [] as string[],
+      fetchModeCounts: { strictCalls: 0, looseCalls: 0 },
+      cache: { hit: false, keyCount: YT_CACHE.size, ttlHours: Math.round(YT_CACHE_TTL_MS / (60 * 60 * 1000)) },
+      lastStatus: undefined as number | undefined,
     };
 
     // 1) Собираем кандидатов (широкая воронка)
@@ -360,19 +446,25 @@ const youtubeProvider: ContentProvider = {
 
     // Чтобы не взрывать лимиты — ограничим число интересов, по которым “копаем” глубоко
     // (если интересов слишком много — берём первые N)
-    const maxInterestsForYoutube = Math.min(interests.length, Math.max(1, Math.ceil(MAX_TOTAL_CANDIDATES / PER_INTEREST_CANDIDATES)));
+    const maxInterestsForYoutube = Math.min(interests.length, MAX_INTERESTS_FOR_FETCH);
     const interestsForFetch = interests.slice(0, maxInterestsForYoutube);
+    debugInfo.usedInterestsForFetch = interestsForFetch.length;
     debugInfo.interestsFetched = interestsForFetch.length;
 
     for (const interest of interestsForFetch) {
       const query = buildQuery(interest);
-      const { items, error, strictEmptyFallbackUsed } = await fetchYouTube(
+      debugInfo.fetchModeCounts.strictCalls += 1;
+      const { items, error, strictEmptyFallbackUsed, cacheHit, status } = await fetchYouTube(
         query,
         PER_INTEREST_CANDIDATES,
         locale,
       );
+      debugInfo.cache.hit = debugInfo.cache.hit || cacheHit;
+      debugInfo.cache.keyCount = YT_CACHE.size;
+      debugInfo.lastStatus = status ?? debugInfo.lastStatus;
       if (strictEmptyFallbackUsed) {
         debugInfo.strictEmptyFallbackUsed = true;
+        debugInfo.fetchModeCounts.looseCalls += 1;
       }
 
       // Ключевая стабильность:
@@ -428,13 +520,27 @@ const youtubeProvider: ContentProvider = {
       );
 
       const primaryFallbackQuery = fallbackQuery || "обучение";
-      const { items: fbItems, error: fbError } = await fetchYouTube(
+      debugInfo.fetchModeCounts.strictCalls += 1;
+      const {
+        items: fbItems,
+        error: fbError,
+        strictEmptyFallbackUsed: fbStrictUsed,
+        status,
+        cacheHit: fbCacheHit,
+      } = await fetchYouTube(
         primaryFallbackQuery,
         25,
         locale,
       );
 
-      debugInfo.globalFallbackUsed = true;
+      debugInfo.fallbackUsed = { used: true, reason: "no-candidates" };
+      debugInfo.cache.hit = debugInfo.cache.hit || fbCacheHit;
+      debugInfo.cache.keyCount = YT_CACHE.size;
+      debugInfo.lastStatus = status ?? debugInfo.lastStatus;
+      if (fbStrictUsed) {
+        debugInfo.fetchModeCounts.looseCalls += 1;
+        debugInfo.strictEmptyFallbackUsed = true;
+      }
 
       if (fbError) {
         // если совсем умер YouTube — отдаем error (не кешируем пустоту), но это уже “реальная” проблема ключа/лимитов
@@ -445,7 +551,14 @@ const youtubeProvider: ContentProvider = {
       let fallbackItems = fbItems ?? [];
       let fallbackQueryUsed = primaryFallbackQuery;
       if (fallbackItems.length === 0 && primaryFallbackQuery !== "обучение") {
-        const { items: secondaryItems, error: secondaryError } = await fetchYouTube(
+        debugInfo.fetchModeCounts.strictCalls += 1;
+        const {
+          items: secondaryItems,
+          error: secondaryError,
+          strictEmptyFallbackUsed: secondaryStrictUsed,
+          status: secondaryStatus,
+          cacheHit: secondaryCacheHit,
+        } = await fetchYouTube(
           "обучение",
           25,
           locale,
@@ -453,6 +566,13 @@ const youtubeProvider: ContentProvider = {
         if (secondaryError) {
           debugInfo.errors.push(secondaryError);
           return { items: [], error: secondaryError, debug: debugInfo };
+        }
+        debugInfo.cache.hit = debugInfo.cache.hit || secondaryCacheHit;
+        debugInfo.cache.keyCount = YT_CACHE.size;
+        debugInfo.lastStatus = secondaryStatus ?? debugInfo.lastStatus;
+        if (secondaryStrictUsed) {
+          debugInfo.fetchModeCounts.looseCalls += 1;
+          debugInfo.strictEmptyFallbackUsed = true;
         }
         fallbackItems = secondaryItems ?? [];
         fallbackQueryUsed = "обучение";
