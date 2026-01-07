@@ -82,6 +82,7 @@ type ContentHubProps = {
   items: NormalizedContentItem[];
   selectionMode: "selected" | "all";
   interestIds: string[];
+  debug?: ContentDebugInfo | null;
   debugEnabled?: boolean;
   interestsError?: string | null;
   availableProviders: ContentProviderId[];
@@ -147,12 +148,8 @@ const sortItems = (items: NormalizedContentItem[], sort: SortOption, seed: numbe
    🧠 КОМПОНЕНТ
    ========================= */
 
-const ContentHub = ({
-  items,
-  debugEnabled = false,
-  interestsError,
-  availableProviders,
-}: ContentHubProps) => {
+const ContentHub = (props: ContentHubProps) => {
+  const { items, debugEnabled = false, interestsError, availableProviders } = props;
   /* 🔒 ЖЁСТКО: провайдеры НЕ зависят от items */
   const providerOptions = availableProviders.length > 0 ? availableProviders : ALL_PROVIDERS;
 

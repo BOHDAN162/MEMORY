@@ -37,8 +37,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
   const idsFromQuery = idsParam.length > 0 ? idsParam : interestsParam;
   const debugParamRaw = resolvedSearchParams?.debug;
   const debugParam = Array.isArray(debugParamRaw) ? debugParamRaw[0] : debugParamRaw;
-  const debugUiEnabled = process.env.NODE_ENV !== "production";
-  const debugMode = debugUiEnabled && debugParam === "1";
+  const debugMode = debugParam === "1";
 
   const providerIds: ContentProviderId[] = ["youtube", "books", "articles", "telegram", "prompts"];
   let interestIds: string[] = [];
@@ -183,13 +182,20 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         items={normalizedItems}
         selectionMode={selectionMode}
         interestIds={interestIds}
+        debug={debug}
         debugEnabled={debugMode}
         interestsError={interestsError}
         availableProviders={providerIds}
       />
 
-      {debugUiEnabled ? (
-        <ContentDebugPanel debug={debug} items={normalizedItems} className="absolute right-0 top-0" />
+      {debugMode ? (
+        <ContentDebugPanel
+          debug={debug}
+          selectionMode={selectionMode}
+          interestIds={interestIds}
+          availableProviders={providerIds}
+          className="mt-6"
+        />
       ) : null}
     </section>
   );
