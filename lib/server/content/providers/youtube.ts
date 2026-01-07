@@ -186,15 +186,6 @@ const fetchYouTube = async (
   return first;
 };
 
-    const payload = (await response.json()) as YouTubeSearchResponse;
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    return { items, error: null, status: response.status };
-  } catch (error) {
-    cleanup();
-    return { items: [], error: `YouTube fetch error: ${(error as Error)?.message ?? String(error)}` };
-  }
-};
-
 const normalizeItem = (
   item: YouTubeSearchItem,
   interest: InterestRow,
