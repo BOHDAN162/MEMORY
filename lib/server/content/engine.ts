@@ -27,6 +27,11 @@ type ProviderDebugInfo = {
   cacheHit: boolean;
   ms: number;
   error: string | null;
+  candidatesTotal?: number;
+  embeddedCount?: number;
+  fallbackUsed?: boolean;
+  topScores?: number[];
+  errors?: string[];
 };
 
 export type ContentEngineDebug = {
@@ -301,11 +306,18 @@ const fetchProviderItems = async (
         | ContentItem[];
 
       const normalized = Array.isArray(result)
-        ? { items: result, error: null }
-        : { items: result.items ?? [], error: result.error ?? null };
+        ? { items: result, error: null, debug: undefined }
+        : {
+            items: result.items ?? [],
+            error: result.error ?? null,
+            debug: result.debug ?? undefined,
+          };
 
       providerItems = normalized.items;
       providerError = normalized.error;
+      if (normalized.debug && typeof normalized.debug === "object") {
+        Object.assign(providerStatus, normalized.debug);
+      }
     } catch (error) {
       providerError = (error as Error)?.message ?? "Unknown provider error";
       if (process.env.NODE_ENV !== "production") {

@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getEmbedding } from "@/lib/server/ai/embeddings";
+import { getEmbedding, getEmbeddings } from "@/lib/server/ai/embeddings";
 import type {
   ContentItem,
   ContentProvider,
@@ -54,6 +54,12 @@ const TIMEOUT_MS = 12_000;
 // Semantic ranking
 const SEMANTIC_TOPK_MULT = 4;           // считаем embeddings для limit*4 кандидатов (после dedupe)
 const EMBEDDING_TEXT_MAX_CHARS = 1200;  // режем текст, чтобы не было огромных payload
+const DESCRIPTION_MAX_CHARS = 800;
+const EMBEDDING_BATCH_SIZE = 32;
+
+const VIDEO_EMBEDDING_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+type CachedVideoEmbedding = { vector: number[]; expiresAt: number };
+const videoEmbeddingCache = new Map<string, CachedVideoEmbedding>();
 
 const pickThumbnail = (item: YouTubeSearchItem): string | null => {
   const thumbs = item.snippet?.thumbnails;
@@ -79,6 +85,37 @@ const createAbortController = (timeoutMs: number): { signal: AbortSignal; cleanu
 const safeTrim = (s: string, max: number) => (s.length > max ? s.slice(0, max) : s);
 
 const normalizeWhitespace = (s: string) => s.replace(/\s+/g, " ").trim();
+
+const extractVideoId = (item: ContentItem): string | null => {
+  if (!item.id) return null;
+  if (item.id.startsWith("youtube:")) return item.id.slice("youtube:".length);
+  return item.id;
+};
+
+const getCachedVideoEmbedding = (videoId: string): number[] | null => {
+  const cached = videoEmbeddingCache.get(videoId);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    videoEmbeddingCache.delete(videoId);
+    return null;
+  }
+  return cached.vector;
+};
+
+const setCachedVideoEmbedding = (videoId: string, vector: number[]) => {
+  videoEmbeddingCache.set(videoId, {
+    vector,
+    expiresAt: Date.now() + VIDEO_EMBEDDING_CACHE_TTL_MS,
+  });
+};
+
+const chunk = <T>(items: T[], size: number): T[][] => {
+  const result: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    result.push(items.slice(i, i + size));
+  }
+  return result;
+};
 
 const buildQuery = (interest: InterestRow): string => {
   const synonyms = Array.isArray(interest.synonyms)
@@ -106,7 +143,7 @@ const fetchInterestRows = async (
     return [];
   }
 
-  return (data as any[]).map((row) => ({
+  return (data as InterestRow[]).map((row) => ({
     id: row.id,
     title: row.title,
     synonyms: Array.isArray(row.synonyms) ? row.synonyms : [],
@@ -240,9 +277,8 @@ const buildQueryTextForEmbedding = (interests: InterestRow[]): string => {
   // Важно: коротко, но информативно.
   const parts = interests.map((i) => {
     const syn = Array.isArray(i.synonyms) ? i.synonyms.filter(Boolean).slice(0, 4) : [];
-    const cluster = i.cluster ? `кластер: ${i.cluster}` : "";
     const synText = syn.length ? `синонимы: ${syn.join(", ")}` : "";
-    return normalizeWhitespace([`интерес: ${i.title}`, synText, cluster].filter(Boolean).join(". "));
+    return normalizeWhitespace([`интерес: ${i.title}`, synText].filter(Boolean).join(". "));
   });
   return parts.join(" | ");
 };
@@ -251,7 +287,7 @@ const buildVideoTextForEmbedding = (item: ContentItem): string => {
   const meta = (item.meta ?? {}) as Record<string, unknown>;
   const channel = typeof meta.channelTitle === "string" ? meta.channelTitle : "";
   const title = item.title ?? "";
-  const desc = item.description ?? "";
+  const desc = safeTrim(item.description ?? "", DESCRIPTION_MAX_CHARS);
   const combined = normalizeWhitespace(`Видео: ${title}. Канал: ${channel}. Описание: ${desc}`);
   return safeTrim(combined, EMBEDDING_TEXT_MAX_CHARS);
 };
@@ -262,7 +298,11 @@ const youtubeProvider: ContentProvider = {
   async fetch(req: ProviderRequest): Promise<ProviderFetchResult> {
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
-      return { items: [], error: "Supabase client is not configured" };
+      return {
+        items: [],
+        error: "Supabase client is not configured",
+        debug: { errors: ["Supabase client is not configured"] },
+      };
     }
 
     const interestIds = Array.from(new Set(req.interestIds.filter(Boolean)));
@@ -270,11 +310,22 @@ const youtubeProvider: ContentProvider = {
 
     const interests = await fetchInterestRows(supabase, interestIds);
     if (interests.length === 0) {
-      return { items: [], error: "Failed to load interests (RLS or query error)" };
+      return {
+        items: [],
+        error: "Failed to load interests (RLS or query error)",
+        debug: { errors: ["Failed to load interests (RLS or query error)"] },
+      };
     }
 
     const totalLimit = Math.max(1, Math.min(req.limit ?? DEFAULT_TOTAL_LIMIT, DEFAULT_TOTAL_LIMIT));
     const locale = req.locale ?? "ru";
+    const debugInfo = {
+      candidatesTotal: 0,
+      embeddedCount: 0,
+      fallbackUsed: false,
+      topScores: [] as number[],
+      errors: [] as string[],
+    };
 
     // 1) Собираем кандидатов (широкая воронка)
     const byVideoId = new Map<string, ContentItem>();
@@ -294,7 +345,8 @@ const youtubeProvider: ContentProvider = {
         if (process.env.NODE_ENV !== "production") {
           console.error("[youtube] provider error", { error, query });
         }
-        return { items: [], error };
+        debugInfo.errors.push(error);
+        return { items: [], error, debug: debugInfo };
       }
 
       for (const rawItem of items) {
@@ -326,34 +378,50 @@ const youtubeProvider: ContentProvider = {
       if (byVideoId.size >= MAX_TOTAL_CANDIDATES) break;
     }
 
- const candidates = Array.from(byVideoId.values());
+    const candidates = Array.from(byVideoId.values());
+    debugInfo.candidatesTotal = candidates.length;
 
-if (candidates.length === 0) {
-  // Глобальный fallback: общий запрос по нескольким интересам, чтобы видео были всегда
-  const fallbackQuery = normalizeWhitespace(
-    interests
-      .slice(0, 5)
-      .map((i) => i.title)
-      .filter(Boolean)
-      .join(" "),
-  );
+    if (candidates.length === 0) {
+      // Глобальный fallback: общий запрос по нескольким интересам, чтобы видео были всегда
+      const fallbackQuery = normalizeWhitespace(
+        interests
+          .slice(0, 5)
+          .map((i) => i.title)
+          .filter(Boolean)
+          .join(" "),
+      );
 
-  const { items: fbItems, error: fbError } = await fetchYouTube(fallbackQuery || "обучение", 25, locale);
+      const { items: fbItems, error: fbError } = await fetchYouTube(
+        fallbackQuery || "обучение",
+        25,
+        locale,
+      );
 
-  if (fbError) {
-    // если совсем умер YouTube — отдаем error (не кешируем пустоту), но это уже “реальная” проблема ключа/лимитов
-    return { items: [], error: fbError };
-  }
+      debugInfo.fallbackUsed = true;
 
-  const firstInterest = interests[0];
-  const normalizedFallback = (fbItems ?? [])
-    .map((raw) => normalizeItem(raw, firstInterest, fallbackQuery))
-    .filter((x): x is ContentItem => Boolean(x))
-    .slice(0, totalLimit)
-    .map((it, idx) => ({ ...it, score: 1 - idx * 0.001, why: "Fallback YouTube: общий подбор по интересам" }));
+      if (fbError) {
+        // если совсем умер YouTube — отдаем error (не кешируем пустоту), но это уже “реальная” проблема ключа/лимитов
+        debugInfo.errors.push(fbError);
+        return { items: [], error: fbError, debug: debugInfo };
+      }
 
-  return { items: normalizedFallback, error: null };
-}
+      const firstInterest = interests[0];
+      const normalizedFallback = (fbItems ?? [])
+        .map((raw) => normalizeItem(raw, firstInterest, fallbackQuery))
+        .filter((x): x is ContentItem => Boolean(x))
+        .slice(0, totalLimit)
+        .map((it, idx) => ({
+          ...it,
+          score: 1 - idx * 0.001,
+          why: "Fallback YouTube: общий подбор по интересам",
+        }));
+
+      debugInfo.topScores = normalizedFallback
+        .slice(0, 5)
+        .map((item) => (typeof item.score === "number" ? item.score : 0));
+
+      return { items: normalizedFallback, error: null, debug: debugInfo };
+    }
 
     // 2) Level 2: Semantic ranking (embeddings)
     // Берем только topK для embeddings, чтобы не жечь токены
@@ -364,37 +432,84 @@ if (candidates.length === 0) {
     const queryEmbedding = await getEmbedding(queryText);
     if (!queryEmbedding) {
       // если embedding недоступен — не ломаем выдачу, просто вернем L1 кандидатов
+      debugInfo.fallbackUsed = true;
+      debugInfo.errors.push("Query embedding unavailable");
       const fallbackItems = candidates.slice(0, totalLimit).map((it, idx) => ({ ...it, score: 1 - idx * 0.001 }));
-      return { items: fallbackItems, error: null };
+      debugInfo.topScores = fallbackItems
+        .slice(0, 5)
+        .map((item) => (typeof item.score === "number" ? item.score : 0));
+      return { items: fallbackItems, error: null, debug: debugInfo };
     }
 
     const scored: Array<{ item: ContentItem; score: number }> = [];
+    const pending: Array<{ item: ContentItem; videoId: string; text: string }> = [];
 
     for (const item of embedCandidates) {
-      const text = buildVideoTextForEmbedding(item);
-      const emb = await getEmbedding(text);
-      if (!emb) continue;
-      const sim = cosineSimilarity(queryEmbedding, emb);
-      scored.push({ item, score: sim });
+      const videoId = extractVideoId(item);
+      if (!videoId) continue;
+
+      const cachedEmbedding = getCachedVideoEmbedding(videoId);
+      if (cachedEmbedding) {
+        scored.push({ item, score: cosineSimilarity(queryEmbedding, cachedEmbedding) });
+        continue;
+      }
+
+      pending.push({
+        item,
+        videoId,
+        text: buildVideoTextForEmbedding(item),
+      });
+    }
+
+    let missingEmbeddings = 0;
+    const batches = chunk(pending, EMBEDDING_BATCH_SIZE);
+    for (const batch of batches) {
+      const embeddings = await getEmbeddings(batch.map((entry) => entry.text));
+      embeddings.forEach((embedding, index) => {
+        const entry = batch[index];
+        if (!entry) return;
+        if (!embedding) {
+          missingEmbeddings += 1;
+          return;
+        }
+        setCachedVideoEmbedding(entry.videoId, embedding);
+        scored.push({ item: entry.item, score: cosineSimilarity(queryEmbedding, embedding) });
+      });
+    }
+
+    debugInfo.embeddedCount = scored.length;
+    if (missingEmbeddings > 0) {
+      debugInfo.errors.push(`Missing embeddings for ${missingEmbeddings} videos`);
     }
 
     if (scored.length === 0) {
       // опять же: не кэшируем пустоту, но возвращаем хоть что-то
+      debugInfo.fallbackUsed = true;
+      debugInfo.errors.push("No video embeddings available");
       const fallbackItems = candidates.slice(0, totalLimit).map((it, idx) => ({ ...it, score: 1 - idx * 0.001 }));
-      return { items: fallbackItems, error: null };
+      debugInfo.topScores = fallbackItems
+        .slice(0, 5)
+        .map((item) => (typeof item.score === "number" ? item.score : 0));
+      return { items: fallbackItems, error: null, debug: debugInfo };
     }
 
     const finalItems = scored
       .sort((a, b) => b.score - a.score)
       .slice(0, totalLimit)
-      .map(({ item, score }) => ({
-        ...item,
-        score,
-        why:
-          typeof item.meta === "object" && item.meta && "interestTitle" in item.meta
-            ? `Релевантно по смыслу интересу “${(item.meta as any).interestTitle}”`
-            : item.why,
-      }));
+      .map(({ item, score }) => {
+        const meta = (item.meta ?? {}) as Record<string, unknown>;
+        const interestTitle =
+          typeof meta.interestTitle === "string" ? meta.interestTitle : null;
+        return {
+          ...item,
+          score,
+          why: interestTitle ? `Релевантно по смыслу интересу “${interestTitle}”` : item.why,
+        };
+      });
+
+    debugInfo.topScores = finalItems
+      .slice(0, 5)
+      .map((item) => (typeof item.score === "number" ? item.score : 0));
 
     if (process.env.NODE_ENV !== "production") {
       console.info("[youtube] semantic ok", {
@@ -406,7 +521,7 @@ if (candidates.length === 0) {
       });
     }
 
-    return { items: finalItems, error: null };
+    return { items: finalItems, error: null, debug: debugInfo };
   },
 };
 
