@@ -48,7 +48,7 @@ const DEFAULT_TOTAL_LIMIT = 20;
 // Candidates pool (for semantic ranking)
 const MAX_INTERESTS_FOR_FETCH = 5;
 const PER_INTEREST_CANDIDATES = 10;     // сколько брать на интерес
-const MAX_TOTAL_CANDIDATES = 60;        // общий лимит кандидатов, чтобы не взорвать embeddings
+const MAX_TOTAL_CANDIDATES = 100;       // общий лимит кандидатов, чтобы не взорвать embeddings
 
 // Timeout
 const TIMEOUT_MS = 12_000;
@@ -439,6 +439,14 @@ const youtubeProvider: ContentProvider = {
       fetchModeCounts: { strictCalls: 0, looseCalls: 0 },
       cache: { hit: false, keyCount: YT_CACHE.size, ttlHours: Math.round(YT_CACHE_TTL_MS / (60 * 60 * 1000)) },
       lastStatus: undefined as number | undefined,
+      semantic: {
+        used: false,
+        candidatesTotal: 0,
+        embeddedCount: 0,
+        topScores: [] as Array<{ id: string; score: number }>,
+        fallbackUsed: false,
+        error: null as string | null,
+      },
     };
 
     // 1) Собираем кандидатов (широкая воронка)
@@ -508,6 +516,7 @@ const youtubeProvider: ContentProvider = {
 
     const candidates = Array.from(byVideoId.values());
     debugInfo.candidatesTotal = candidates.length;
+    debugInfo.semantic.candidatesTotal = candidates.length;
 
     if (candidates.length === 0) {
       // Глобальный fallback: общий запрос по нескольким интересам, чтобы видео были всегда
@@ -592,11 +601,18 @@ const youtubeProvider: ContentProvider = {
       debugInfo.topScores = normalizedFallback
         .slice(0, 5)
         .map((item) => (typeof item.score === "number" ? item.score : 0));
+      debugInfo.semantic.topScores = normalizedFallback
+        .slice(0, 5)
+        .map((item) => ({
+          id: item.id,
+          score: typeof item.score === "number" ? item.score : 0,
+        }));
 
       return { items: normalizedFallback, error: null, debug: debugInfo };
     }
 
     // 2) Level 2: Semantic ranking (embeddings)
+    debugInfo.semantic.used = true;
     // Берем только topK для embeddings, чтобы не жечь токены
     const topKForEmbeddings = Math.min(candidates.length, Math.max(totalLimit * SEMANTIC_TOPK_MULT, 40));
     const embedCandidates = candidates.slice(0, topKForEmbeddings);
@@ -611,10 +627,18 @@ const youtubeProvider: ContentProvider = {
     if (!queryEmbedding) {
       // если embedding недоступен — не ломаем выдачу, просто вернем L1 кандидатов
       debugInfo.errors.push("Query embedding unavailable");
+      debugInfo.semantic.fallbackUsed = true;
+      debugInfo.semantic.error = "query-embedding-unavailable";
       const fallbackItems = candidates.slice(0, totalLimit).map((it, idx) => ({ ...it, score: 1 - idx * 0.001 }));
       debugInfo.topScores = fallbackItems
         .slice(0, 5)
         .map((item) => (typeof item.score === "number" ? item.score : 0));
+      debugInfo.semantic.topScores = fallbackItems
+        .slice(0, 5)
+        .map((item) => ({
+          id: item.id,
+          score: typeof item.score === "number" ? item.score : 0,
+        }));
       return { items: fallbackItems, error: null, debug: debugInfo };
     }
 
@@ -656,6 +680,7 @@ const youtubeProvider: ContentProvider = {
     }
 
     debugInfo.embeddedCount = scored.length;
+    debugInfo.semantic.embeddedCount = scored.length;
     if (missingEmbeddings > 0) {
       debugInfo.errors.push(`Missing embeddings for ${missingEmbeddings} videos`);
     }
@@ -663,10 +688,18 @@ const youtubeProvider: ContentProvider = {
     if (scored.length === 0) {
       // опять же: не кэшируем пустоту, но возвращаем хоть что-то
       debugInfo.errors.push("No video embeddings available");
+      debugInfo.semantic.fallbackUsed = true;
+      debugInfo.semantic.error = "no-video-embeddings";
       const fallbackItems = candidates.slice(0, totalLimit).map((it, idx) => ({ ...it, score: 1 - idx * 0.001 }));
       debugInfo.topScores = fallbackItems
         .slice(0, 5)
         .map((item) => (typeof item.score === "number" ? item.score : 0));
+      debugInfo.semantic.topScores = fallbackItems
+        .slice(0, 5)
+        .map((item) => ({
+          id: item.id,
+          score: typeof item.score === "number" ? item.score : 0,
+        }));
       return { items: fallbackItems, error: null, debug: debugInfo };
     }
 
@@ -689,6 +722,12 @@ const youtubeProvider: ContentProvider = {
     debugInfo.topScores = finalItems
       .slice(0, 5)
       .map((item) => (typeof item.score === "number" ? item.score : 0));
+    debugInfo.semantic.topScores = finalItems
+      .slice(0, 5)
+      .map((item) => ({
+        id: item.id,
+        score: typeof item.score === "number" ? item.score : 0,
+      }));
 
     if (process.env.NODE_ENV !== "production") {
       console.info("[youtube] semantic ok", {
