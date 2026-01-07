@@ -120,50 +120,71 @@ const fetchYouTube = async (
   locale: string,
 ): Promise<{ items: YouTubeSearchItem[]; error: string | null; status?: number }> => {
   const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return { items: [], error: "YOUTUBE_API_KEY is not set" };
 
-  if (!apiKey) {
-    return { items: [], error: "YOUTUBE_API_KEY is not set" };
-  }
-
-  const params = new URLSearchParams({
-    part: "snippet",
-    type: "video",
-    maxResults: String(limit),
-    q: query,
-    safeSearch: "moderate",
-    relevanceLanguage: locale,
-    regionCode: "RU",
-    videoEmbeddable: "true",
-    // order=date помогает от “вечной одинаковой выдачи”, особенно на общих запросах
-    order: "date",
-    key: apiKey,
-  });
-
-  const { signal, cleanup } = createAbortController(TIMEOUT_MS);
-
-  try {
-    const response = await fetch(`${YOUTUBE_API_URL}?${params.toString()}`, {
-      method: "GET",
-      signal,
-      headers: { Accept: "application/json" },
-      cache: "no-store",
+  const doRequest = async (mode: "strict" | "loose") => {
+    const params = new URLSearchParams({
+      part: "snippet",
+      type: "video",
+      maxResults: String(limit),
+      q: query,
+      safeSearch: "moderate",
+      order: mode === "strict" ? "date" : "relevance",
+      key: apiKey,
     });
 
-    cleanup();
-
-    if (!response.ok) {
-      let body = "";
-      try {
-        body = await response.text();
-      } catch {
-        // ignore
-      }
-      return {
-        items: [],
-        error: `YouTube request failed: ${response.status} ${response.statusText}${body ? ` | ${body.slice(0, 200)}` : ""}`,
-        status: response.status,
-      };
+    // STRICT — как было (но это иногда даёт 0)
+    if (mode === "strict") {
+      params.set("relevanceLanguage", locale);
+      params.set("regionCode", "RU");
+      params.set("videoEmbeddable", "true");
     }
+
+    const { signal, cleanup } = createAbortController(TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${YOUTUBE_API_URL}?${params.toString()}`, {
+        method: "GET",
+        signal,
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+
+      cleanup();
+
+      if (!response.ok) {
+        let body = "";
+        try {
+          body = await response.text();
+        } catch {}
+        return {
+          items: [],
+          error: `YouTube request failed: ${response.status} ${response.statusText}${body ? ` | ${body.slice(0, 200)}` : ""}`,
+          status: response.status,
+        };
+      }
+
+      const payload = (await response.json()) as YouTubeSearchResponse;
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      return { items, error: null, status: response.status };
+    } catch (error) {
+      cleanup();
+      return { items: [], error: `YouTube fetch error: ${(error as Error)?.message ?? String(error)}` };
+    }
+  };
+
+  // 1) strict
+  const first = await doRequest("strict");
+  if (first.error) return first;
+
+  // Если strict дал 0 — это не ошибка, но нужно “спасти” результат
+  if ((first.items ?? []).length === 0) {
+    const second = await doRequest("loose");
+    return second.error ? first : second;
+  }
+
+  return first;
+};
 
     const payload = (await response.json()) as YouTubeSearchResponse;
     const items = Array.isArray(payload.items) ? payload.items : [];
@@ -314,13 +335,34 @@ const youtubeProvider: ContentProvider = {
       if (byVideoId.size >= MAX_TOTAL_CANDIDATES) break;
     }
 
-    const candidates = Array.from(byVideoId.values());
+ const candidates = Array.from(byVideoId.values());
 
-    // Если кандидатов ноль — это тоже “стабильностный” кейс:
-    // не кэшируем пустоту, пусть движок не записывает это.
-    if (candidates.length === 0) {
-      return { items: [], error: "YouTube returned 0 candidates (avoid caching empty)" };
-    }
+if (candidates.length === 0) {
+  // Глобальный fallback: общий запрос по нескольким интересам, чтобы видео были всегда
+  const fallbackQuery = normalizeWhitespace(
+    interests
+      .slice(0, 5)
+      .map((i) => i.title)
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  const { items: fbItems, error: fbError } = await fetchYouTube(fallbackQuery || "обучение", 25, locale);
+
+  if (fbError) {
+    // если совсем умер YouTube — отдаем error (не кешируем пустоту), но это уже “реальная” проблема ключа/лимитов
+    return { items: [], error: fbError };
+  }
+
+  const firstInterest = interests[0];
+  const normalizedFallback = (fbItems ?? [])
+    .map((raw) => normalizeItem(raw, firstInterest, fallbackQuery))
+    .filter((x): x is ContentItem => Boolean(x))
+    .slice(0, totalLimit)
+    .map((it, idx) => ({ ...it, score: 1 - idx * 0.001, why: "Fallback YouTube: общий подбор по интересам" }));
+
+  return { items: normalizedFallback, error: null };
+}
 
     // 2) Level 2: Semantic ranking (embeddings)
     // Берем только topK для embeddings, чтобы не жечь токены
