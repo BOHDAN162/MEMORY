@@ -3,10 +3,9 @@
 import "@xyflow/react/dist/style.css";
 
 import { addUserInterestAction } from "@/app/actions/add-user-interest";
-import { createManualEdgeAction } from "@/app/actions/create-manual-edge";
-import { deleteManualEdgeAction } from "@/app/actions/delete-manual-edge";
 import { saveMapPosition } from "@/app/actions/save-map-position";
 import { saveMapPositions } from "@/app/actions/save-map-positions";
+import { ClusterNode } from "@/components/features/map/cluster-node";
 import { InterestNode } from "@/components/features/map/interest-node";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -19,7 +18,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { clusterKey, computeClusterLayout, placeMissingNodesNearClusters } from "@/lib/map/auto-layout";
+import {
+  CLUSTER_ORDER,
+  clusterLabel,
+  computeClusterLayout,
+  normalizeClusterKey,
+  placeMissingNodesNearClusters,
+} from "@/lib/map/auto-layout";
 import type { MapInterestNode, MapManualEdge } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
@@ -27,7 +32,6 @@ import {
   CircleHelp,
   Hand,
   Maximize2,
-  MousePointer2,
   PanelLeft,
   Plus,
   RefreshCcw,
@@ -57,14 +61,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 type InterestNodeData = {
   title: string;
   cluster: string | null;
-  clusterLabel: string;
   isActive?: boolean;
   isSelected?: boolean;
   isMultiSelected?: boolean;
   isDragging?: boolean;
-  isConnectSource?: boolean;
-  isConnectTarget?: boolean;
-  isPreviewTarget?: boolean;
 };
 
 type MapCanvasProps = {
@@ -104,7 +104,12 @@ const EmptyMapState = () => (
     </div>
   </div>
 );
-const nodeTypes = { interest: InterestNode };
+const nodeTypes = { interest: InterestNode, cluster: ClusterNode };
+
+const NODE_WIDTH = 190;
+const NODE_HEIGHT = 68;
+const CLUSTER_PADDING_X = 140;
+const CLUSTER_PADDING_Y = 120;
 
 type ManualEdgeState = {
   sourceId: string;
@@ -149,13 +154,13 @@ const MANUAL_EDGE_STYLE = {
   filter: "drop-shadow(0 0 8px hsl(var(--primary) / 0.35))",
 };
 
-const PREVIEW_EDGE_STYLE = {
-  stroke: "hsl(var(--primary) / 0.65)",
-  strokeWidth: 2.2,
-  opacity: 0.85,
-  strokeDasharray: "6 6",
+const SELECTION_EDGE_STYLE = {
+  stroke: "hsl(var(--primary) / 0.85)",
+  strokeWidth: 2.6,
+  opacity: 0.95,
   transition: EDGE_TRANSITION,
   strokeLinecap: "round" as const,
+  filter: "drop-shadow(0 0 12px hsl(var(--primary) / 0.45))",
 };
 
 const toManualEdgeState = (edges: MapManualEdge[]): ManualEdgeState[] => {
@@ -185,7 +190,7 @@ const buildAutoEdges = (nodes: MapInterestNode[]): Edge[] => {
   const grouped = new Map<string, MapInterestNode[]>();
 
   nodes.forEach((node) => {
-    const key = clusterKey(node.cluster);
+    const key = normalizeClusterKey(node.cluster);
     const list = grouped.get(key) ?? [];
     list.push(node);
     grouped.set(key, list);
@@ -200,22 +205,23 @@ const buildAutoEdges = (nodes: MapInterestNode[]): Edge[] => {
 
     if (sorted.length <= 1) return;
 
-    if (sorted.length <= 6) {
-      for (let i = 0; i < sorted.length - 1; i += 1) {
-        const [sourceId, targetId] = normalizeEdgePair(sorted[i]!.id, sorted[i + 1]!.id);
-        edges.push({
-          id: autoEdgeId(cluster, sourceId, targetId),
-          source: sourceId,
-          target: targetId,
-          type: "smoothstep",
-          animated: false,
-          style: AUTO_EDGE_STYLE,
-          data: { kind: "auto", cluster },
-        });
-      }
-    } else {
+    const chainLimit = Math.min(8, sorted.length);
+    for (let i = 0; i < chainLimit - 1; i += 1) {
+      const [sourceId, targetId] = normalizeEdgePair(sorted[i]!.id, sorted[i + 1]!.id);
+      edges.push({
+        id: autoEdgeId(cluster, sourceId, targetId),
+        source: sourceId,
+        target: targetId,
+        type: "smoothstep",
+        animated: false,
+        style: AUTO_EDGE_STYLE,
+        data: { kind: "auto", cluster },
+      });
+    }
+
+    if (sorted.length > 6) {
       const hub = sorted[0]!;
-      const spokes = sorted.slice(1, 7);
+      const spokes = sorted.slice(1, 6);
       spokes.forEach((node) => {
         const [sourceId, targetId] = normalizeEdgePair(hub.id, node.id);
         edges.push({
@@ -229,6 +235,42 @@ const buildAutoEdges = (nodes: MapInterestNode[]): Edge[] => {
         });
       });
     }
+  });
+
+  const clusterAnchors = new Map<string, MapInterestNode>();
+  grouped.forEach((clusterNodes, cluster) => {
+    const sorted = [...clusterNodes].sort(
+      (a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id),
+    );
+    if (sorted.length > 0) {
+      clusterAnchors.set(cluster, sorted[0]!);
+    }
+  });
+
+  const crossLinks: Array<[string, string]> = [
+    ["learning", "business"],
+    ["self", "learning"],
+    ["health", "self"],
+    ["creativity", "business"],
+    ["finance", "business"],
+    ["communication", "business"],
+  ];
+
+  crossLinks.forEach(([sourceCluster, targetCluster]) => {
+    const source = clusterAnchors.get(sourceCluster);
+    const target = clusterAnchors.get(targetCluster);
+    if (!source || !target || source.id === target.id) return;
+
+    const [sourceId, targetId] = normalizeEdgePair(source.id, target.id);
+    edges.push({
+      id: autoEdgeId("cross", sourceId, targetId),
+      source: sourceId,
+      target: targetId,
+      type: "smoothstep",
+      animated: false,
+      style: AUTO_EDGE_STYLE,
+      data: { kind: "auto", cluster: "cross" },
+    });
   });
 
   const unique = new Map<string, Edge>();
@@ -295,7 +337,6 @@ const buildLayout = (interests: MapInterestNode[]) => {
     data: {
       title: interest.title,
       cluster: interest.cluster,
-      clusterLabel: clusterKey(interest.cluster),
     },
   }));
 
@@ -332,23 +373,17 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
   const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
-  const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(
     null,
   );
   const toastTimeoutRef = useRef<number | null>(null);
   const lastSuccessAtRef = useRef(0);
-  const [connectMode, setConnectMode] = useState(false);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [edgeError, setEdgeError] = useState<string | null>(null);
-  const [edgePendingKey, setEdgePendingKey] = useState<string | null>(null);
   const reactFlow = useReactFlow();
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const hasFittedRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectionHint, setSelectionHint] = useState<string | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [isResettingLayout, setIsResettingLayout] = useState(false);
@@ -363,9 +398,8 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   const highlightNodeIds = useMemo(() => {
     const set = new Set(selectedInterestIds);
     if (activeNodeId) set.add(activeNodeId);
-    if (connectFromId) set.add(connectFromId);
     return set;
-  }, [activeNodeId, connectFromId, selectedInterestIds]);
+  }, [activeNodeId, selectedInterestIds]);
   const presentInterestIds = useMemo(
     () => interestNodes.map((interest) => interest.id),
     [interestNodes],
@@ -385,11 +419,8 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }, [nodes.length, reactFlow, shouldFitView]);
 
   useEffect(() => {
-    const merged = mergeEdges(autoEdges, manualEdgesState).map((edge) =>
-      edge.id === selectedEdgeId ? { ...edge, selected: true } : edge,
-    );
-    setEdges(merged);
-  }, [autoEdges, manualEdgesState, selectedEdgeId, setEdges]);
+    setEdges(mergeEdges(autoEdges, manualEdgesState));
+  }, [autoEdges, manualEdgesState, setEdges]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -467,26 +498,30 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     () =>
       edges.map((edge) => {
         const isManual = edge.data?.kind === "manual";
+        const isSelection = edge.data?.kind === "selection";
         const isConnected =
           highlightNodeIds.has(edge.source) || highlightNodeIds.has(edge.target);
-        const isEdgeSelected = edge.id === selectedEdgeId;
         const hasHighlight = highlightNodeIds.size > 0;
-        const baseStyle = isManual ? MANUAL_EDGE_STYLE : AUTO_EDGE_STYLE;
-        const emphasized = isConnected || isEdgeSelected;
-        const strokeWidth = emphasized ? (isManual ? 2.4 : 2) : baseStyle.strokeWidth;
+        const baseStyle = isSelection
+          ? SELECTION_EDGE_STYLE
+          : isManual
+            ? MANUAL_EDGE_STYLE
+            : AUTO_EDGE_STYLE;
+        const emphasized = isSelection || isConnected;
+        const strokeWidth = emphasized ? (isManual ? 2.4 : baseStyle.strokeWidth) : baseStyle.strokeWidth;
         const opacity = emphasized ? 0.95 : hasHighlight ? 0.35 : baseStyle.opacity;
         const stroke = emphasized
-          ? `hsl(var(--primary) / ${isManual ? 0.95 : 0.75})`
+          ? `hsl(var(--primary) / ${isManual || isSelection ? 0.95 : 0.75})`
           : baseStyle.stroke;
         const filter =
-          isManual && (emphasized || isEdgeSelected)
-            ? "drop-shadow(0 0 12px hsl(var(--primary) / 0.55))"
+          isManual || isSelection
+            ? "drop-shadow(0 0 12px hsl(var(--primary) / 0.45))"
             : baseStyle.filter;
 
         return {
           ...edge,
           type: "smoothstep",
-          animated: isManual,
+          animated: isManual || isSelection,
           style: {
             ...baseStyle,
             strokeWidth,
@@ -496,29 +531,34 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
           },
         };
       }),
-    [edges, highlightNodeIds, selectedEdgeId],
+    [edges, highlightNodeIds],
   );
 
-  const previewEdge = useMemo(() => {
-    if (!connectMode || !connectFromId) return null;
-    if (!activeNodeId || activeNodeId === connectFromId) return null;
-
-    return {
-      id: `preview-${connectFromId}-${activeNodeId}`,
-      source: connectFromId,
-      target: activeNodeId,
-      type: "smoothstep",
-      animated: true,
-      selectable: false,
-      focusable: false,
-      style: PREVIEW_EDGE_STYLE,
-      data: { kind: "preview" },
-    } satisfies Edge;
-  }, [activeNodeId, connectFromId, connectMode]);
+  const selectionEdges = useMemo(() => {
+    if (!selectionMode || selectedInterestIdsSorted.length < 2) return [];
+    const edgesList: Edge[] = [];
+    for (let i = 0; i < selectedInterestIdsSorted.length - 1; i += 1) {
+      const source = selectedInterestIdsSorted[i]!;
+      const target = selectedInterestIdsSorted[i + 1]!;
+      const [sourceId, targetId] = normalizeEdgePair(source, target);
+      edgesList.push({
+        id: `s:${sourceId}-${targetId}`,
+        source: sourceId,
+        target: targetId,
+        type: "smoothstep",
+        animated: true,
+        selectable: false,
+        focusable: false,
+        style: SELECTION_EDGE_STYLE,
+        data: { kind: "selection" },
+      });
+    }
+    return edgesList;
+  }, [selectedInterestIdsSorted, selectionMode]);
 
   const renderedEdges = useMemo(
-    () => (previewEdge ? [...styledEdges, previewEdge] : styledEdges),
-    [previewEdge, styledEdges],
+    () => [...styledEdges, ...selectionEdges],
+    [selectionEdges, styledEdges],
   );
 
   const autoSavePayload = useMemo(
@@ -564,11 +604,6 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     [onEdgesChange],
   );
 
-  const handleSelectionChange = useCallback((params: { edges?: Edge[] }) => {
-    const selected = params.edges?.[0];
-    setSelectedEdgeId(selected?.id ?? null);
-  }, []);
-
   const handlePaneMouseLeave = useCallback(() => {
     setActiveNodeId(null);
   }, []);
@@ -603,22 +638,65 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     () =>
       nodes.map((node) => ({
         ...node,
-        selected: selectedIds.has(node.id) || connectFromId === node.id,
+        selected: selectedIds.has(node.id),
+        style: { zIndex: 2 },
         data: {
           ...node.data,
-          isActive: activeNodeId === node.id || connectFromId === node.id,
-          isSelected: selectedIds.has(node.id) || connectFromId === node.id,
+          isActive: activeNodeId === node.id,
+          isSelected: selectedIds.has(node.id),
           isMultiSelected: selectedIds.size > 1 && selectedIds.has(node.id),
           isDragging: draggingNodeId === node.id,
-          isConnectSource: connectFromId === node.id,
-          isConnectTarget:
-            connectMode && Boolean(connectFromId) && node.id === activeNodeId && node.id !== connectFromId,
-          isPreviewTarget:
-            connectMode && Boolean(connectFromId) && node.id === activeNodeId && node.id !== connectFromId,
         },
       })),
-    [activeNodeId, connectFromId, connectMode, draggingNodeId, nodes, selectedIds],
+    [activeNodeId, draggingNodeId, nodes, selectedIds],
   );
+
+  const clusterNodes = useMemo(() => {
+    const clusters = new Map<string, InterestFlowNode[]>();
+    nodes.forEach((node) => {
+      const key = normalizeClusterKey(node.data.cluster);
+      const list = clusters.get(key) ?? [];
+      list.push(node);
+      clusters.set(key, list);
+    });
+
+    const orderIndex = (key: string) => {
+      const index = CLUSTER_ORDER.indexOf(key as (typeof CLUSTER_ORDER)[number]);
+      return index === -1 ? CLUSTER_ORDER.length : index;
+    };
+
+    return Array.from(clusters.entries())
+      .sort((a, b) => orderIndex(a[0]) - orderIndex(b[0]) || a[0].localeCompare(b[0]))
+      .map(([key, clusterNodesList]) => {
+        const positions = clusterNodesList.map((node) => node.position);
+        const minX = Math.min(...positions.map((pos) => pos.x));
+        const minY = Math.min(...positions.map((pos) => pos.y));
+        const maxX = Math.max(...positions.map((pos) => pos.x));
+        const maxY = Math.max(...positions.map((pos) => pos.y));
+
+        const width = maxX - minX + NODE_WIDTH + CLUSTER_PADDING_X * 2;
+        const height = maxY - minY + NODE_HEIGHT + CLUSTER_PADDING_Y * 2;
+
+        return {
+          id: `cluster:${key}`,
+          type: "cluster",
+          position: {
+            x: minX - CLUSTER_PADDING_X,
+            y: minY - CLUSTER_PADDING_Y,
+          },
+          data: {
+            label: clusterLabel(key),
+            width,
+            height,
+          },
+          draggable: false,
+          selectable: false,
+          connectable: false,
+          focusable: false,
+          style: { zIndex: 0 },
+        } satisfies Node;
+      });
+  }, [nodes]);
 
   const getCanvasCenter = useCallback(() => {
     if (typeof window === "undefined") return { x: 0, y: 0 };
@@ -716,7 +794,6 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
           data: {
             title: interest.title,
             cluster: interest.cluster,
-            clusterLabel: interest.clusterLabel,
           },
         },
       ]);
@@ -761,98 +838,13 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     [addPendingId, getCanvasCenter, interestNodes],
   );
 
-  const nodeTitleMap = useMemo(
-    () => new Map(interestNodes.map((interest) => [interest.id, interest.title])),
-    [interestNodes],
-  );
-
-  const manualEdgePairs = useMemo(
-    () => new Set(manualEdgesState.map((edge) => edgePairKey(edge.sourceId, edge.targetId))),
-    [manualEdgesState],
-  );
-
-  const handleConnectToggle = useCallback(() => {
-    setConnectMode((prev) => {
-      const next = !prev;
-      if (!next) {
-        setConnectFromId(null);
-        setSelectionHint(null);
-      } else {
-        setSelectionMode(false);
-        setSelectionHint("Режим выбора недоступен, пока включено «Соединить».");
-      }
-      return next;
-    });
-    setEdgeError(null);
-  }, []);
-
-  const createManualEdge = useCallback(
-    async (sourceId: string, targetId: string) => {
-      const [normalizedSource, normalizedTarget] = normalizeEdgePair(sourceId, targetId);
-      const pairKey = edgePairKey(normalizedSource, normalizedTarget);
-
-      if (manualEdgePairs.has(pairKey)) {
-        setEdgeError("Такая связь уже есть.");
-        setConnectFromId(null);
-        setEdgePendingKey(null);
-        return;
-      }
-
-      setEdgeError(null);
-      setEdgePendingKey(pairKey);
-      setManualEdgesState((prev) => [...prev, { sourceId: normalizedSource, targetId: normalizedTarget }]);
-
-      const { error } = await createManualEdgeAction({
-        sourceId: normalizedSource,
-        targetId: normalizedTarget,
-      });
-
-      if (error) {
-        setEdgeError(error);
-        setManualEdgesState((prev) =>
-          prev.filter((edge) => edgePairKey(edge.sourceId, edge.targetId) !== pairKey),
-        );
-      } else {
-        setToast({ message: "Связь сохранена", variant: "success" });
-      }
-
-      setEdgePendingKey(null);
-      setConnectFromId(null);
-    },
-    [manualEdgePairs],
-  );
-
   const handleSelectionModeToggle = useCallback(() => {
-    if (connectMode) {
-      setSelectionHint("Сначала отключите «Соединить», чтобы включить выбор.");
-      return;
-    }
-    setSelectionHint(null);
     setSelectionMode((prev) => !prev);
-  }, [connectMode]);
+  }, []);
 
   const handleNodeClick = useCallback(
     (event: ReactMouseEvent, node: InterestFlowNode) => {
       if (!node?.id) return;
-
-      if (connectMode) {
-        if (edgePendingKey) return;
-
-        setEdgeError(null);
-
-        if (!connectFromId) {
-          setConnectFromId(node.id);
-          return;
-        }
-
-        if (connectFromId === node.id) {
-          setEdgeError("Выберите другой узел, чтобы создать связь.");
-          return;
-        }
-
-        void createManualEdge(connectFromId, node.id);
-        return;
-      }
 
       const hasToggleModifier = event.ctrlKey || event.metaKey || event.shiftKey;
 
@@ -862,27 +854,13 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
         selectSingle(node.id);
       }
     },
-    [
-      connectFromId,
-      connectMode,
-      createManualEdge,
-      edgePendingKey,
-      selectSingle,
-      selectionMode,
-      toggleSelect,
-    ],
+    [selectSingle, selectionMode, toggleSelect],
   );
 
   const handlePaneClick = useCallback(() => {
-    if (connectMode) {
-      setConnectFromId(null);
-      setActiveNodeId(null);
-      return;
-    }
     clearSelection();
-    setSelectedEdgeId(null);
     setActiveNodeId(null);
-  }, [clearSelection, connectMode]);
+  }, [clearSelection]);
 
   const handlePickSelected = useCallback(() => {
     if (selectedInterestIdsSorted.length === 0) return;
@@ -896,40 +874,9 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     router.push("/content?mode=all");
   }, [router]);
 
-  const handleDeleteManualEdge = useCallback(async () => {
-    if (!selectedEdgeId) return;
-
-    const targetEdge = edges.find((edge) => edge.id === selectedEdgeId);
-    if (!targetEdge || targetEdge.data?.kind !== "manual") return;
-
-    const [sourceId, targetId] = normalizeEdgePair(targetEdge.source, targetEdge.target);
-    const pairKey = edgePairKey(sourceId, targetId);
-
-    setEdgeError(null);
-    setEdgePendingKey(pairKey);
-    setSelectedEdgeId(null);
-    setManualEdgesState((prev) =>
-      prev.filter((edge) => edgePairKey(edge.sourceId, edge.targetId) !== pairKey),
-    );
-
-    const { error } = await deleteManualEdgeAction({ sourceId, targetId });
-
-    if (error) {
-      setEdgeError(error);
-      setManualEdgesState((prev) => [...prev, { sourceId, targetId }]);
-    } else {
-      setToast({ message: "Связь удалена", variant: "success" });
-    }
-
-    setEdgePendingKey(null);
-  }, [edges, selectedEdgeId]);
-
   const handleResetLayout = useCallback(async () => {
     setResetDialogOpen(false);
     setIsResettingLayout(true);
-    setSelectionHint(null);
-    setConnectFromId(null);
-    setConnectMode(false);
     setSelectionMode(false);
     setActiveNodeId(null);
     setDraggingNodeId(null);
@@ -984,27 +931,6 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     reactFlow.fitView({ padding: 0.22, duration: 320 });
   }, [reactFlow]);
 
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (!selectedEdgeId) return;
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
-
-      const active = document.activeElement as HTMLElement | null;
-      if (
-        active &&
-        (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      void handleDeleteManualEdge();
-    };
-
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [handleDeleteManualEdge, selectedEdgeId]);
-
   useEffect(
     () => () => {
       if (toastTimeoutRef.current) {
@@ -1026,22 +952,9 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     }, 1800);
   }, [toast]);
 
-  const selectedEdge = useMemo(
-    () => edges.find((edge) => edge.id === selectedEdgeId),
-    [edges, selectedEdgeId],
-  );
-
-  const canDeleteSelected = selectedEdge?.data?.kind === "manual";
-
-  const connectHint = connectMode
-    ? connectFromId
-      ? `Выбрано: «${nodeTitleMap.get(connectFromId) ?? "интерес"}». Наведите или нажмите второй узел.`
-      : "Соединить: выберите 2 интереса, наведите — увидите предварительную линию."
-    : "Нажмите «Соединить», чтобы добавить ручные связи и подсветку путей.";
-
   const selectionStatus = selectionMode
     ? "Режим выбора включен: тапайте или кликайте, чтобы отметить несколько узлов."
-    : "Клик — выбрать. Shift/Ctrl — мульти. На мобильном включите «Выбор».";
+    : "Клик — выбрать. Shift/Ctrl — мульти. На мобильном включите «Режим выбора».";
   const selectionHelperText = hasSelection
     ? "Используем только отмеченные узлы."
     : "Выберите хотя бы один интерес.";
@@ -1053,8 +966,6 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
         ? "Формируем авто-раскладку..."
         : "Перетаскивайте узлы — раскладка сохранится автоматически";
 
-  const edgeStatus = edgePendingKey ? "Сохраняем связь..." : positionStatus;
-
   if (initialInterests.length === 0) {
     return <EmptyMapState />;
   }
@@ -1062,18 +973,19 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   const togglePanel = () => setIsPanelOpen((prev) => !prev);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border/80 bg-[radial-gradient(circle_at_20%_15%,rgba(129,140,248,0.16),rgba(15,23,42,0.65)),radial-gradient(circle_at_80%_85%,rgba(56,189,248,0.12),rgba(15,23,42,0.7))] shadow-[0_20px_70px_-35px_rgba(0,0,0,0.6)]">
+    <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle_at_20%_15%,rgba(129,140,248,0.16),rgba(15,23,42,0.7)),radial-gradient(circle_at_80%_85%,rgba(56,189,248,0.12),rgba(15,23,42,0.75))]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_35%_20%,rgba(124,58,237,0.12),transparent_45%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_75%_70%,rgba(79,70,229,0.08),transparent_50%)]" />
       <div ref={canvasRef} className="relative h-full min-h-[520px] w-full">
         <ReactFlow
-          nodes={displayedNodes}
+          nodes={[...clusterNodes, ...displayedNodes]}
           edges={renderedEdges}
           minZoom={0.4}
           maxZoom={1.6}
           nodeTypes={nodeTypes}
+          proOptions={{ hideAttribution: true }}
           panOnScroll
-          selectionOnDrag={selectionMode && !connectMode}
+          selectionOnDrag={selectionMode}
           panOnDrag={!selectionMode}
           deleteKeyCode={null}
           onNodesChange={handleNodesChange}
@@ -1081,13 +993,12 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
           onNodeDragStart={handleNodeDragStart}
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleNodeClick}
-          onSelectionChange={handleSelectionChange}
           onPaneClick={handlePaneClick}
           onPaneMouseLeave={handlePaneMouseLeave}
           onNodeMouseEnter={handleNodeMouseEnter}
           onNodeMouseLeave={handleNodeMouseLeave}
           className={cn(
-            "bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.03),transparent_35%),radial-gradient(circle_at_20%_80%,rgba(255,255,255,0.03),transparent_35%)]",
+            "bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.03),transparent_35%),radial-gradient(circle_at_20%_80%,rgba(255,255,255,0.03),transparent_35%)] [&_.react-flow__attribution]:hidden",
           )}
         >
           <Background
@@ -1172,36 +1083,11 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
               >
                 <div className="mt-12 max-h-[calc(100vh-220px)] overflow-y-auto rounded-2xl border border-border/80 bg-background/95 px-4 py-3 text-xs shadow-xl shadow-black/15 backdrop-blur">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={connectMode ? "primary" : "soft"}
-                        className={cn(
-                          "h-9 rounded-full px-3",
-                          edgePendingKey && "cursor-not-allowed opacity-60",
-                        )}
-                        disabled={Boolean(edgePendingKey)}
-                        onClick={handleConnectToggle}
-                      >
-                        <MousePointer2 className="h-4 w-4" aria-hidden />
-                        <span className="hidden sm:inline">Соединить</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="soft"
-                        className={cn(
-                          "h-9 rounded-full px-3",
-                          (!canDeleteSelected || edgePendingKey) && "cursor-not-allowed opacity-60",
-                          canDeleteSelected && !edgePendingKey && "text-destructive",
-                        )}
-                        disabled={!canDeleteSelected || Boolean(edgePendingKey)}
-                        onClick={() => void handleDeleteManualEdge()}
-                      >
-                        <RefreshCcw className="h-4 w-4 rotate-45" aria-hidden />
-                        <span className="hidden sm:inline">Удалить связь</span>
-                      </Button>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-foreground">Панель</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Подсказки по управлению картой и рекомендации.
+                      </p>
                     </div>
                     <Button
                       type="button"
@@ -1213,28 +1099,9 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
                       <X className="h-4 w-4" aria-hidden />
                     </Button>
                   </div>
-                  <div className="mt-2 flex items-center gap-2 rounded-full border border-border/70 bg-card/70 px-3 py-1.5 text-[11px] shadow-inner shadow-black/5">
-                    <span className="font-semibold text-foreground">Выбрано: {selectedInterestIds.length}</span>
-                    <button
-                      type="button"
-                      onClick={clearSelection}
-                      disabled={selectedInterestIds.length === 0}
-                      className={cn(
-                        "rounded-full px-2 py-1 font-semibold transition",
-                        selectedInterestIds.length === 0
-                          ? "cursor-not-allowed bg-muted text-muted-foreground"
-                          : "bg-primary/10 text-primary hover:bg-primary/20",
-                      )}
-                    >
-                      Сбросить
-                    </button>
-                  </div>
                   <div className="mt-3 grid gap-1 text-[11px] leading-relaxed text-muted-foreground">
-                    <p className="text-foreground/80">{connectHint}</p>
                     <p className="text-foreground/80">{selectionStatus}</p>
-                    <p>{edgeStatus}</p>
-                    {edgeError ? <p className="text-destructive">{edgeError}</p> : null}
-                    {selectionHint ? <p className="text-primary">{selectionHint}</p> : null}
+                    <p>{positionStatus}</p>
                   </div>
                   <div className="mt-4 space-y-3 rounded-2xl border border-border/70 bg-card/70 p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -1293,7 +1160,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
                       <span>Быстрые подсказки</span>
                     </div>
                     <p>Клик — выбрать. Shift/Ctrl — мульти.</p>
-                    <p>В режиме «Соединить» наведите на второй узел — линия покажет связку, клик её сохранит.</p>
+                    <p>В «Режиме выбора» линии связывают отмеченные узлы.</p>
                     <p>Перетяни узел — позиция сохранится. Фит-вью внизу слева.</p>
                     <p>На мобильном включи «Режим выбора», чтобы отметить несколько.</p>
                   </div>
