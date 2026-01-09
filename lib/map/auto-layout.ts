@@ -12,15 +12,67 @@ export type LayoutOptions = {
 };
 
 const DEFAULT_LAYOUT_OPTIONS: Required<LayoutOptions> = {
-  nodeWidth: 220,
-  nodeHeight: 88,
-  xGap: 240,
-  yGap: 140,
-  panelGapX: 360,
-  panelGapY: 300,
+  nodeWidth: 200,
+  nodeHeight: 68,
+  xGap: 220,
+  yGap: 120,
+  panelGapX: 520,
+  panelGapY: 360,
 };
 
 export const clusterKey = (cluster: string | null) => cluster?.trim() || "Без кластера";
+
+export const CLUSTER_ORDER = [
+  "business",
+  "learning",
+  "self",
+  "creativity",
+  "health",
+  "finance",
+  "communication",
+  "other",
+] as const;
+
+const CLUSTER_LABELS: Record<(typeof CLUSTER_ORDER)[number], string> = {
+  business: "Бизнес",
+  learning: "Обучение",
+  self: "Саморазвитие",
+  creativity: "Творчество",
+  health: "Здоровье",
+  finance: "Финансы",
+  communication: "Коммуникации",
+  other: "Другое",
+};
+
+const CLUSTER_MATCHERS: Array<[RegExp, (typeof CLUSTER_ORDER)[number]]> = [
+  [/business|бизнес|предприним|маркетинг|sales|продаж/, "business"],
+  [/learn|study|education|обуч|курс|школ|навык/, "learning"],
+  [/self|личн|саморазв|развитие|growth/, "self"],
+  [/creative|креатив|art|дизайн|муз|писат|контент/, "creativity"],
+  [/health|здоров|fitness|спорт|йога|медиц/, "health"],
+  [/finance|финанс|money|инвест|budget|капитал/, "finance"],
+  [/commun|общен|communication|network|relationship|переговор/, "communication"],
+];
+
+export const normalizeClusterKey = (cluster: string | null) => {
+  if (!cluster) return "other";
+  const raw = cluster.toLowerCase().trim();
+  if (!raw) return "other";
+  const normalized = raw.replace(/[^a-zа-я0-9]+/gi, "");
+
+  for (const [matcher, key] of CLUSTER_MATCHERS) {
+    if (matcher.test(normalized) || matcher.test(raw)) {
+      return key;
+    }
+  }
+
+  return CLUSTER_ORDER.includes(raw as (typeof CLUSTER_ORDER)[number])
+    ? (raw as (typeof CLUSTER_ORDER)[number])
+    : "other";
+};
+
+export const clusterLabel = (cluster: string | null) =>
+  CLUSTER_LABELS[normalizeClusterKey(cluster)];
 
 const getClusterColumns = (clusterCount: number) => {
   if (clusterCount <= 2) return 1;
@@ -41,6 +93,13 @@ const averagePosition = (positions: Position[]): Position => {
 };
 
 const clusterSorter = (a: [string, MapInterestNode[]], b: [string, MapInterestNode[]]) => {
+  const orderIndex = (key: string) => {
+    const index = CLUSTER_ORDER.indexOf(key as (typeof CLUSTER_ORDER)[number]);
+    return index === -1 ? CLUSTER_ORDER.length : index;
+  };
+
+  const orderDelta = orderIndex(a[0]) - orderIndex(b[0]);
+  if (orderDelta !== 0) return orderDelta;
   if (b[1].length !== a[1].length) {
     return b[1].length - a[1].length;
   }
@@ -60,7 +119,7 @@ export const computeClusterLayout = (
   const clusters = new Map<string, MapInterestNode[]>();
 
   nodes.forEach((node) => {
-    const key = clusterKey(node.cluster);
+    const key = normalizeClusterKey(node.cluster);
     if (!clusters.has(key)) clusters.set(key, []);
     clusters.get(key)!.push(node);
   });
@@ -139,7 +198,7 @@ export const placeMissingNodesNearClusters = (
   Array.from(defaultLayout.entries()).forEach(([id, position]) => {
     const node = nodesById.get(id);
     if (!node) return;
-    const key = clusterKey(node.cluster);
+    const key = normalizeClusterKey(node.cluster);
     const existing = clusterFallbackPositions.get(key) ?? [];
     existing.push(position);
     clusterFallbackPositions.set(key, existing);
@@ -149,7 +208,7 @@ export const placeMissingNodesNearClusters = (
   positionMap.forEach((pos, id) => {
     const node = nodesById.get(id);
     if (!node) return;
-    const key = clusterKey(node.cluster);
+    const key = normalizeClusterKey(node.cluster);
     const list = savedClusterPositions.get(key) ?? [];
     list.push(pos);
     savedClusterPositions.set(key, list);
@@ -157,7 +216,7 @@ export const placeMissingNodesNearClusters = (
 
   const missingByCluster = new Map<string, MapInterestNode[]>();
   missingNodes.forEach((node) => {
-    const key = clusterKey(node.cluster);
+    const key = normalizeClusterKey(node.cluster);
     const list = missingByCluster.get(key) ?? [];
     list.push(node);
     missingByCluster.set(key, list);

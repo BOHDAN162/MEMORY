@@ -26,7 +26,7 @@ const MapPage = async () => {
   }
 
   return (
-    <section className="relative h-[calc(100vh-160px)] w-full min-h-[560px] overflow-hidden">
+    <section className="relative -mx-4 -my-6 flex h-[calc(100vh-120px)] w-[calc(100%+2rem)] min-h-[560px] overflow-hidden sm:-mx-8 sm:w-[calc(100%+4rem)]">
       {error ? (
         <div className="absolute left-4 right-4 top-4 z-10 rounded-xl border border-destructive/40 bg-destructive/90 px-4 py-3 text-sm text-destructive-foreground shadow-lg">
           Не удалось загрузить карту интересов: {error}
