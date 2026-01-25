@@ -6,8 +6,6 @@ import { buildWhy } from "@/lib/content/why";
 import { getContent } from "@/lib/server/content/service";
 import type { ContentItem, ContentProviderId, ContentType } from "@/lib/server/content/types";
 import { getUserInterests } from "@/lib/server/interests";
-import { getCurrentUserBoardData } from "@/lib/server/board";
-import { BoardCanvas } from "@/components/features/map/board-canvas";
 
 type ContentPageSearchParams = {
   ids?: string | string[];
@@ -76,9 +74,6 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         mode: selectionMode,
       })
     : null;
-  const boardResult = await getCurrentUserBoardData();
-  const boardData = boardResult.data;
-
   const items = contentResult?.items ?? [];
   const debug: ContentDebugInfo | null = contentResult?.debug ?? null;
 
@@ -180,31 +175,6 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         <p className="text-sm text-muted-foreground">
           Управляйте источниками, типами и сортировкой, чтобы быстро найти нужное.
         </p>
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex flex-col gap-1">
-          <p className="text-xs uppercase tracking-[0.24em] text-primary">Miro-lite</p>
-          <h2 className="text-xl font-semibold text-foreground">Доска идей</h2>
-          <p className="text-sm text-muted-foreground">
-            Создавайте заметки, тексты, изображения и связывайте их стрелками прямо на доске.
-          </p>
-        </div>
-        {boardResult.error ? (
-          <div className="rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            Не удалось загрузить доску: {boardResult.error}
-          </div>
-        ) : null}
-        {boardData ? (
-          <div className="h-[60vh] min-h-[520px] w-full">
-            <BoardCanvas
-              boardId={boardData.boardId}
-              nodes={boardData.nodes}
-              edges={boardData.edges}
-              viewport={boardData.viewport}
-            />
-          </div>
-        ) : null}
       </div>
 
       <ContentHub

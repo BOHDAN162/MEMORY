@@ -46,7 +46,7 @@ export const fetchBoardNodes = async (
 ): Promise<{ data: BoardNodeRecord[]; error: string | null }> => {
   const { data, error } = await supabase
     .from("board_nodes")
-    .select("id,type,position,data,style")
+    .select("id,type,position,data,width,height,z_index")
     .eq("board_id", boardId);
 
   if (error) {
@@ -60,7 +60,9 @@ export const fetchBoardNodes = async (
         type: row.type as BoardNodeRecord["type"],
         position: row.position as BoardNodeRecord["position"],
         data: (row.data as BoardNodeRecord["data"]) ?? null,
-        style: (row.style as BoardNodeRecord["style"]) ?? null,
+        width: typeof row.width === "number" ? row.width : undefined,
+        height: typeof row.height === "number" ? row.height : undefined,
+        zIndex: typeof row.z_index === "number" ? row.z_index : undefined,
       })) ?? [],
     error: null,
   };
@@ -72,7 +74,7 @@ export const fetchBoardEdges = async (
 ): Promise<{ data: BoardEdgeRecord[]; error: string | null }> => {
   const { data, error } = await supabase
     .from("board_edges")
-    .select("id,source,target,type,data")
+    .select("id,source,target,data,style")
     .eq("board_id", boardId);
 
   if (error) {
@@ -85,8 +87,8 @@ export const fetchBoardEdges = async (
         id: row.id as string,
         source: row.source as string,
         target: row.target as string,
-        type: (row.type as string) ?? null,
         data: (row.data as BoardEdgeRecord["data"]) ?? null,
+        style: (row.style as BoardEdgeRecord["style"]) ?? null,
       })) ?? [],
     error: null,
   };
@@ -126,7 +128,9 @@ export const upsertBoardNodes = async (
     type: node.type,
     position: node.position,
     data: node.data ?? {},
-    style: node.style ?? null,
+    width: node.width ?? null,
+    height: node.height ?? null,
+    z_index: node.zIndex ?? 0,
   }));
 
   const { error } = await supabase.from("board_nodes").upsert(payload, { onConflict: "id" });
@@ -166,8 +170,8 @@ export const upsertBoardEdges = async (
     board_id: boardId,
     source: edge.source,
     target: edge.target,
-    type: edge.type ?? null,
     data: edge.data ?? {},
+    style: edge.style ?? {},
   }));
 
   const { error } = await supabase.from("board_edges").upsert(payload, { onConflict: "id" });

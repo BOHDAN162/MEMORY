@@ -2,7 +2,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, NodeResizer, Position } from "@xyflow/react";
 
 import { cn } from "@/lib/utils/cn";
-import type { FrameNodeData } from "@/components/features/map/board-node-types";
+import type { FrameNodeData } from "@/components/features/map/board/board-types";
 
 export const FrameNode = ({ data, selected }: NodeProps<Node<FrameNodeData>>) => {
   return (

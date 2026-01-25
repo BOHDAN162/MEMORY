@@ -3,7 +3,7 @@ import { Handle, NodeResizer, Position } from "@xyflow/react";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils/cn";
-import type { ImageNodeData } from "@/components/features/map/board-node-types";
+import type { ImageNodeData } from "@/components/features/map/board/board-types";
 
 export const ImageNode = ({ data, selected }: NodeProps<Node<ImageNodeData>>) => {
   const [draft, setDraft] = useState(data.url ?? "");
@@ -75,7 +75,12 @@ export const ImageNode = ({ data, selected }: NodeProps<Node<ImageNodeData>>) =>
           className={cn("h-full w-full object-cover", data.isEditing && "opacity-25")}
         />
       ) : (
-        <div className={cn("flex h-full w-full items-center justify-center text-xs text-muted-foreground", data.isEditing && "opacity-0")}>
+        <div
+          className={cn(
+            "flex h-full w-full items-center justify-center text-xs text-muted-foreground",
+            data.isEditing && "opacity-0",
+          )}
+        >
           Двойной клик — вставить URL
         </div>
       )}

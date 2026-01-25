@@ -3,7 +3,7 @@ import { Handle, Position } from "@xyflow/react";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils/cn";
-import type { TextNodeData } from "@/components/features/map/board-node-types";
+import type { TextNodeData } from "@/components/features/map/board/board-types";
 
 export const TextNode = ({ data, selected }: NodeProps<Node<TextNodeData>>) => {
   const [draft, setDraft] = useState(data.text ?? "");

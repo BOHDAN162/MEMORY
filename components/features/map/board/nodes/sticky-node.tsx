@@ -3,7 +3,7 @@ import { Handle, NodeResizer, Position } from "@xyflow/react";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils/cn";
-import type { StickyNodeData } from "@/components/features/map/board-node-types";
+import type { StickyNodeData } from "@/components/features/map/board/board-types";
 
 export const StickyNode = ({ data, selected }: NodeProps<Node<StickyNodeData>>) => {
   const [draft, setDraft] = useState(data.text ?? "");
