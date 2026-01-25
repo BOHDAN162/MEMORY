@@ -61,7 +61,7 @@ import {
   type OnNodeDrag,
   type Viewport,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 
 type InterestNodeData = {
   kind: "interest";
@@ -685,7 +685,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     setActiveNodeId(null);
   }, []);
 
-  const handleNodeMouseEnter = useCallback((_: any, node: MapFlowNode) => {
+  const handleNodeMouseEnter = useCallback((_: ReactMouseEvent, node: MapFlowNode) => {
     if (!isInterestNode(node)) return;
     setActiveNodeId(node.id);
   }, []);
@@ -1022,7 +1022,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }, [connectMode]);
 
   const handleNodeClick = useCallback(
-    (event: any, node: MapFlowNode) => {
+    (event: ReactMouseEvent, node: MapFlowNode) => {
       if (!node?.id || !isInterestNode(node)) return;
 
       if (connectMode) {
