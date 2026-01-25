@@ -685,7 +685,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     setActiveNodeId(null);
   }, []);
 
-  const handleNodeMouseEnter = useCallback((_: ReactMouseEvent, node: MapFlowNode) => {
+  const handleNodeMouseEnter = useCallback((_: any, node: MapFlowNode) => {
     if (!isInterestNode(node)) return;
     setActiveNodeId(node.id);
   }, []);
