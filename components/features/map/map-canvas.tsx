@@ -1022,7 +1022,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }, [connectMode]);
 
   const handleNodeClick = useCallback(
-    (event: ReactMouseEvent, node: MapFlowNode) => {
+    (event: any, node: MapFlowNode) => {
       if (!node?.id || !isInterestNode(node)) return;
 
       if (connectMode) {
