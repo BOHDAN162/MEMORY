@@ -2,20 +2,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils/cn";
-
-type InterestNodeData = {
-  kind: "interest";
-  title: string;
-  cluster: string | null;
-  clusterLabel: string;
-  isActive?: boolean;
-  isSelected?: boolean;
-  isMultiSelected?: boolean;
-  isDragging?: boolean;
-  isConnectSource?: boolean;
-  isConnectTarget?: boolean;
-  isPreviewTarget?: boolean;
-};
+import type { InterestNodeData } from "@/components/features/map/board/board-types";
 
 export const InterestNode = ({ data, selected }: NodeProps<Node<InterestNodeData>>) => {
   const isHighlighted = data.isActive || data.isSelected;

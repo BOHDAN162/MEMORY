@@ -5,15 +5,17 @@ export type BoardNodeRecord = {
   type: BoardNodeType;
   position: { x: number; y: number };
   data: Record<string, unknown> | null;
-  style?: Record<string, unknown> | null;
+  width?: number;
+  height?: number;
+  zIndex?: number;
 };
 
 export type BoardEdgeRecord = {
   id: string;
   source: string;
   target: string;
-  type?: string | null;
   data?: Record<string, unknown> | null;
+  style?: Record<string, unknown> | null;
 };
 
 export type BoardViewport = {
