@@ -55,12 +55,13 @@ import {
   useReactFlow,
   type Edge,
   type OnEdgesChange,
+  type OnMove,
   type Node,
   type OnNodesChange,
   type OnNodeDrag,
   type Viewport,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type InterestNodeData = {
   kind: "interest";
@@ -1253,12 +1254,9 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }
 
   const togglePanel = () => setIsPanelOpen((prev) => !prev);
-  const handleViewportMove = useCallback(
-    (_event: ReactMouseEvent | TouchEvent, viewport: Viewport) => {
-      setCamera(viewport);
-    },
-    [],
-  );
+  const handleViewportMove: OnMove = useCallback((_event, viewport: Viewport) => {
+    setCamera(viewport);
+  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle_at_20%_15%,rgba(129,140,248,0.16),rgba(15,23,42,0.7)),radial-gradient(circle_at_80%_85%,rgba(56,189,248,0.12),rgba(15,23,42,0.75))]">
