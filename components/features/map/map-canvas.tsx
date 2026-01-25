@@ -55,11 +55,13 @@ import {
   useReactFlow,
   type Edge,
   type OnEdgesChange,
+  type OnMove,
   type Node,
   type OnNodesChange,
   type OnNodeDrag,
+  type Viewport,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type InterestNodeData = {
   kind: "interest";
@@ -130,6 +132,8 @@ const NODE_HEIGHT = 68;
 const CLUSTER_PADDING_X = 140;
 const CLUSTER_PADDING_Y = 120;
 const ENABLE_CLUSTER_NODES = true;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 2;
 
 const isInterestNode = (node: MapFlowNode): node is InterestFlowNode =>
   node.data.kind === "interest";
@@ -404,6 +408,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   const [pendingNodeId, setPendingNodeId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [addPendingId, setAddPendingId] = useState<string | null>(null);
+  const [camera, setCamera] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
   const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
@@ -459,6 +464,10 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     }, 50);
     return () => clearTimeout(timeout);
   }, [nodes.length, reactFlow, shouldFitView]);
+
+  useEffect(() => {
+    setCamera(reactFlow.getViewport());
+  }, [reactFlow]);
 
   useEffect(() => {
     const merged = mergeEdges(autoEdges, manualEdgesState).map((edge) =>
@@ -676,7 +685,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
     setActiveNodeId(null);
   }, []);
 
-  const handleNodeMouseEnter = useCallback((_: ReactMouseEvent, node: MapFlowNode) => {
+  const handleNodeMouseEnter = useCallback((_: any, node: MapFlowNode) => {
     if (!isInterestNode(node)) return;
     setActiveNodeId(node.id);
   }, []);
@@ -1013,7 +1022,7 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }, [connectMode]);
 
   const handleNodeClick = useCallback(
-    (event: ReactMouseEvent, node: MapFlowNode) => {
+    (event: any, node: MapFlowNode) => {
       if (!node?.id || !isInterestNode(node)) return;
 
       if (connectMode) {
@@ -1152,14 +1161,14 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }, [interestNodes, reactFlow, setNodes]);
 
   const handleZoomIn = useCallback(() => {
-    const current = reactFlow.getZoom();
-    reactFlow.zoomTo(current + 0.2, { duration: 200 });
-  }, [reactFlow]);
+    const nextZoom = Math.min(MAX_ZOOM, camera.zoom + 0.2);
+    reactFlow.zoomTo(nextZoom, { duration: 200 });
+  }, [camera.zoom, reactFlow]);
 
   const handleZoomOut = useCallback(() => {
-    const current = reactFlow.getZoom();
-    reactFlow.zoomTo(Math.max(0.4, current - 0.2), { duration: 200 });
-  }, [reactFlow]);
+    const nextZoom = Math.max(MIN_ZOOM, camera.zoom - 0.2);
+    reactFlow.zoomTo(nextZoom, { duration: 200 });
+  }, [camera.zoom, reactFlow]);
 
   const handleFitView = useCallback(() => {
     reactFlow.fitView({ padding: 0.22, duration: 320 });
@@ -1245,6 +1254,9 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
   }
 
   const togglePanel = () => setIsPanelOpen((prev) => !prev);
+  const handleViewportMove: OnMove = useCallback((_event, viewport: Viewport) => {
+    setCamera(viewport);
+  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle_at_20%_15%,rgba(129,140,248,0.16),rgba(15,23,42,0.7)),radial-gradient(circle_at_80%_85%,rgba(56,189,248,0.12),rgba(15,23,42,0.75))]">
@@ -1254,14 +1266,18 @@ const MapCanvasInner = ({ interests: initialInterests, manualEdges }: MapCanvasP
         <ReactFlow
           nodes={flowNodesForRender}
           edges={renderedEdges}
-          minZoom={0.4}
-          maxZoom={1.6}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          viewport={camera}
           nodeTypes={nodeTypes}
           proOptions={{ hideAttribution: true }}
-          panOnScroll
+          panOnScroll={false}
+          zoomOnScroll
+          zoomOnPinch
           selectionOnDrag={selectionMode && !connectMode}
           panOnDrag={!selectionMode}
           deleteKeyCode={null}
+          onMove={handleViewportMove}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onNodeDragStart={handleNodeDragStart}
