@@ -3,10 +3,32 @@ import type { BoardEdgeRecord, BoardNodeRecord, BoardViewport } from "@/lib/type
 
 export type BoardRow = {
   id: string;
-  user_id: string;
+  owner_user_id: string;
   title: string;
   created_at: string;
   updated_at: string;
+};
+
+const toEdgePayloadData = (edge: BoardEdgeRecord) => {
+  const data: Record<string, unknown> = {};
+  if (edge.data) {
+    Object.assign(data, edge.data);
+  }
+  if (edge.style && Object.keys(edge.style).length > 0) {
+    data.style = edge.style;
+  }
+  return data;
+};
+
+const parseEdgeData = (raw: unknown): { data: Record<string, unknown> | null; style: Record<string, unknown> | null } => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { data: null, style: null };
+  }
+  const { style, ...rest } = raw as Record<string, unknown>;
+  const styleValue =
+    style && typeof style === "object" && !Array.isArray(style) ? (style as Record<string, unknown>) : null;
+  const dataValue = Object.keys(rest).length > 0 ? rest : null;
+  return { data: dataValue, style: styleValue };
 };
 
 export const ensureBoardForUser = async (
@@ -15,8 +37,8 @@ export const ensureBoardForUser = async (
 ): Promise<{ data: BoardRow | null; error: string | null }> => {
   const { data: existing, error: fetchError } = await supabase
     .from("boards")
-    .select("id,user_id,title,created_at,updated_at")
-    .eq("user_id", userId)
+    .select("id,owner_user_id,title,created_at,updated_at")
+    .eq("owner_user_id", userId)
     .maybeSingle();
 
   if (fetchError) {
@@ -29,8 +51,8 @@ export const ensureBoardForUser = async (
 
   const { data: created, error: insertError } = await supabase
     .from("boards")
-    .insert({ user_id: userId, title: "My board" })
-    .select("id,user_id,title,created_at,updated_at")
+    .insert({ owner_user_id: userId, title: "My board" })
+    .select("id,owner_user_id,title,created_at,updated_at")
     .single();
 
   if (insertError) {
@@ -46,7 +68,7 @@ export const fetchBoardNodes = async (
 ): Promise<{ data: BoardNodeRecord[]; error: string | null }> => {
   const { data, error } = await supabase
     .from("board_nodes")
-    .select("id,type,position,data,width,height,z_index")
+    .select("id,type,x,y,data,width,height,rotation,z_index")
     .eq("board_id", boardId);
 
   if (error) {
@@ -58,10 +80,12 @@ export const fetchBoardNodes = async (
       data?.map((row) => ({
         id: row.id as string,
         type: row.type as BoardNodeRecord["type"],
-        position: row.position as BoardNodeRecord["position"],
+        x: typeof row.x === "number" ? row.x : 0,
+        y: typeof row.y === "number" ? row.y : 0,
         data: (row.data as BoardNodeRecord["data"]) ?? null,
         width: typeof row.width === "number" ? row.width : undefined,
         height: typeof row.height === "number" ? row.height : undefined,
+        rotation: typeof row.rotation === "number" ? row.rotation : undefined,
         zIndex: typeof row.z_index === "number" ? row.z_index : undefined,
       })) ?? [],
     error: null,
@@ -74,7 +98,7 @@ export const fetchBoardEdges = async (
 ): Promise<{ data: BoardEdgeRecord[]; error: string | null }> => {
   const { data, error } = await supabase
     .from("board_edges")
-    .select("id,source,target,data,style")
+    .select("id,source_node_id,target_node_id,label,data")
     .eq("board_id", boardId);
 
   if (error) {
@@ -83,13 +107,17 @@ export const fetchBoardEdges = async (
 
   return {
     data:
-      data?.map((row) => ({
-        id: row.id as string,
-        source: row.source as string,
-        target: row.target as string,
-        data: (row.data as BoardEdgeRecord["data"]) ?? null,
-        style: (row.style as BoardEdgeRecord["style"]) ?? null,
-      })) ?? [],
+      data?.map((row) => {
+        const parsed = parseEdgeData(row.data as BoardEdgeRecord["data"]);
+        return {
+          id: row.id as string,
+          source: row.source_node_id as string,
+          target: row.target_node_id as string,
+          label: typeof row.label === "string" ? row.label : null,
+          data: parsed.data,
+          style: parsed.style,
+        };
+      }) ?? [],
     error: null,
   };
 };
@@ -100,7 +128,7 @@ export const fetchBoardViewport = async (
 ): Promise<{ data: BoardViewport | null; error: string | null }> => {
   const { data, error } = await supabase
     .from("board_viewport")
-    .select("viewport")
+    .select("x,y,zoom")
     .eq("board_id", boardId)
     .maybeSingle();
 
@@ -108,11 +136,18 @@ export const fetchBoardViewport = async (
     return { data: null, error: error.message };
   }
 
-  if (!data?.viewport) {
+  if (!data) {
     return { data: null, error: null };
   }
 
-  return { data: data.viewport as BoardViewport, error: null };
+  return {
+    data: {
+      x: typeof data.x === "number" ? data.x : 0,
+      y: typeof data.y === "number" ? data.y : 0,
+      zoom: typeof data.zoom === "number" ? data.zoom : 1,
+    },
+    error: null,
+  };
 };
 
 export const upsertBoardNodes = async (
@@ -126,10 +161,12 @@ export const upsertBoardNodes = async (
     id: node.id,
     board_id: boardId,
     type: node.type,
-    position: node.position,
+    x: node.x,
+    y: node.y,
     data: node.data ?? {},
     width: node.width ?? null,
     height: node.height ?? null,
+    rotation: node.rotation ?? 0,
     z_index: node.zIndex ?? 0,
   }));
 
@@ -168,10 +205,10 @@ export const upsertBoardEdges = async (
   const payload = edges.map((edge) => ({
     id: edge.id,
     board_id: boardId,
-    source: edge.source,
-    target: edge.target,
-    data: edge.data ?? {},
-    style: edge.style ?? {},
+    source_node_id: edge.source,
+    target_node_id: edge.target,
+    label: edge.label ?? null,
+    data: toEdgePayloadData(edge),
   }));
 
   const { error } = await supabase.from("board_edges").upsert(payload, { onConflict: "id" });
@@ -204,10 +241,15 @@ export const upsertBoardViewport = async (
   boardId: string,
   viewport: BoardViewport,
 ): Promise<{ error: string | null }> => {
-  const { error } = await supabase.from("board_viewport").upsert({
-    board_id: boardId,
-    viewport,
-  });
+  const { error } = await supabase.from("board_viewport").upsert(
+    {
+      board_id: boardId,
+      x: viewport.x,
+      y: viewport.y,
+      zoom: viewport.zoom,
+    },
+    { onConflict: "board_id" },
+  );
 
   if (error) {
     return { error: error.message };

@@ -26,6 +26,7 @@ import { ImageNode } from "@/components/features/map/board/nodes/image-node";
 import { InterestNode } from "@/components/features/map/board/nodes/interest-node";
 import { StickyNode } from "@/components/features/map/board/nodes/sticky-node";
 import { TextNode } from "@/components/features/map/board/nodes/text-node";
+import { boardStorageMigrationSql } from "@/lib/map/board-storage-migration";
 import { clusterLabel, computeClusterLayout, placeMissingNodesNearClusters } from "@/lib/map/auto-layout";
 import type { MapInterestNode, MapManualEdge } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
@@ -179,6 +180,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "offline">("idle");
   const [saveMessage, setSaveMessage] = useState("Не сохранено");
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -197,51 +199,46 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     { past: [], future: [] },
   );
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      setIsLoadingBoard(true);
-      const result = await loadBoardStorage();
-      if (!mounted) return;
+  const loadBoard = useCallback(async () => {
+    setIsLoadingBoard(true);
+    const result = await loadBoardStorage();
 
-      if (result.error) {
-        setStorageError(result.error);
-        setIsLoadingBoard(false);
-        setSaveState("error");
-        setSaveMessage("Хранилище недоступно");
-        return;
-      }
-
-      setBoardId(result.data.boardId);
-      setStorageError(null);
-      const boardNodes = result.data.nodes.map((record) => toFlowNode(record));
-      const boardEdges = result.data.edges.map((record) => toFlowEdge(record));
-      viewportRef.current = result.data.viewport;
-
-      setNodes((prev) => {
-        const existingIds = new Set(prev.map((node) => node.id));
-        const merged = [...prev];
-        boardNodes.forEach((node) => {
-          if (!existingIds.has(node.id)) {
-            merged.push(node);
-          }
-        });
-        return merged;
-      });
-      setEdges(boardEdges);
-      lastSavedNodeIds.current = new Set(boardNodes.map((node) => node.id));
-      lastSavedEdgeIds.current = new Set(boardEdges.map((edge) => edge.id));
-      setSaveState("idle");
-      setSaveMessage("Сохранено");
-      reactFlow.setViewport(result.data.viewport, { duration: 0 });
+    if (result.error) {
+      setStorageError(result.error);
       setIsLoadingBoard(false);
-    };
+      setSaveState("error");
+      setSaveMessage("Хранилище недоступно");
+      return;
+    }
 
-    void load();
-    return () => {
-      mounted = false;
-    };
-  }, [setEdges, setNodes]);
+    setBoardId(result.data.boardId);
+    setStorageError(null);
+    const boardNodes = result.data.nodes.map((record) => toFlowNode(record));
+    const boardEdges = result.data.edges.map((record) => toFlowEdge(record));
+    viewportRef.current = result.data.viewport;
+
+    setNodes((prev) => {
+      const existingIds = new Set(prev.map((node) => node.id));
+      const merged = [...prev];
+      boardNodes.forEach((node) => {
+        if (!existingIds.has(node.id)) {
+          merged.push(node);
+        }
+      });
+      return merged;
+    });
+    setEdges(boardEdges);
+    lastSavedNodeIds.current = new Set(boardNodes.map((node) => node.id));
+    lastSavedEdgeIds.current = new Set(boardEdges.map((edge) => edge.id));
+    setSaveState("idle");
+    setSaveMessage("Сохранено");
+    reactFlow.setViewport(result.data.viewport, { duration: 0 });
+    setIsLoadingBoard(false);
+  }, [reactFlow, setEdges, setNodes]);
+
+  useEffect(() => {
+    void loadBoard();
+  }, [loadBoard]);
 
   useEffect(() => {
     if (!shouldFitView || nodes.length === 0) return;
@@ -295,6 +292,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          label: typeof edge.label === "string" ? edge.label : null,
           data: edge.data ?? {},
           style: edge.style ? (edge.style as Record<string, unknown>) : {},
         }));
@@ -1142,12 +1140,26 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
 
   const storageNotice = useMemo(() => {
     if (!storageError) return null;
-    if (!storageError.missingTables) return storageError.message;
-    if (process.env.NODE_ENV !== "production") {
-      return "Board storage not initialized. Apply the Supabase migration for boards.";
+    if (!storageError.missingTables) {
+      return { title: "Ошибка доступа к хранилищу", message: storageError.message, missingTables: false };
     }
-    return "Board storage not initialized.";
+    return {
+      title: "Board storage not initialized",
+      message: "Нужно применить SQL миграцию Supabase для таблиц boards/board_nodes/board_edges/board_viewport.",
+      missingTables: true,
+    };
   }, [storageError]);
+
+  const handleCopySql = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(boardStorageMigrationSql);
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 2000);
+    } catch {
+      setCopyStatus("error");
+      window.setTimeout(() => setCopyStatus("idle"), 2000);
+    }
+  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle_at_20%_15%,rgba(129,140,248,0.16),rgba(15,23,42,0.7)),radial-gradient(circle_at_80%_85%,rgba(56,189,248,0.12),rgba(15,23,42,0.75))]">
@@ -1387,41 +1399,31 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
 
       {storageNotice ? (
         <div className="absolute left-4 top-4 z-30 max-w-md rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          <p className="font-semibold">{storageNotice}</p>
-          <p className="mt-2 text-xs text-destructive/80">
-            Если вы администратор, примените SQL миграцию Supabase для tables boards/board_nodes/board_edges/board_viewport.
-          </p>
-          <button
-            type="button"
-            className={buttonVariants({ variant: "soft", size: "sm" })}
-            onClick={() => void loadBoardStorage().then((result) => {
-              if (result.error) {
-                setStorageError(result.error);
-                return;
-              }
-              setStorageError(null);
-              setBoardId(result.data.boardId);
-              const boardNodes = result.data.nodes.map((record) => toFlowNode(record));
-              const boardEdges = result.data.edges.map((record) => toFlowEdge(record));
-              viewportRef.current = result.data.viewport;
-              setNodes((prev) => {
-                const existingIds = new Set(prev.map((node) => node.id));
-                const merged = [...prev];
-                boardNodes.forEach((node) => {
-                  if (!existingIds.has(node.id)) {
-                    merged.push(node);
-                  }
-                });
-                return merged;
-              });
-              setEdges(boardEdges);
-              lastSavedNodeIds.current = new Set(boardNodes.map((node) => node.id));
-              lastSavedEdgeIds.current = new Set(boardEdges.map((edge) => edge.id));
-              reactFlow.setViewport(result.data.viewport, { duration: 0 });
-            })}
-          >
-            Retry
-          </button>
+          <p className="font-semibold">{storageNotice.title}</p>
+          <p className="mt-2 text-xs text-destructive/80">{storageNotice.message}</p>
+          {storageNotice.missingTables ? (
+            <p className="mt-2 text-xs text-destructive/80">
+              Открой Supabase &rarr; SQL Editor &rarr; вставь SQL ниже и нажми Run, затем обнови страницу.
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {storageNotice.missingTables ? (
+              <button
+                type="button"
+                className={buttonVariants({ variant: "soft", size: "sm" })}
+                onClick={handleCopySql}
+              >
+                {copyStatus === "copied" ? "SQL скопирован" : copyStatus === "error" ? "Не удалось скопировать" : "Copy SQL"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={buttonVariants({ variant: "soft", size: "sm" })}
+              onClick={() => void loadBoard()}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       ) : null}
 
