@@ -6,4 +6,3 @@ export type {
   PersonalityTypeId,
 } from "./personality";
 export type { MapInterestNode, MapManualEdge } from "./map";
-export type { BoardEdgeRecord, BoardNodeRecord, BoardNodeType, BoardViewport } from "./board";

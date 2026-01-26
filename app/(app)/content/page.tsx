@@ -74,6 +74,7 @@ const ContentPage = async ({ searchParams }: ContentPageProps) => {
         mode: selectionMode,
       })
     : null;
+
   const items = contentResult?.items ?? [];
   const debug: ContentDebugInfo | null = contentResult?.debug ?? null;
 
