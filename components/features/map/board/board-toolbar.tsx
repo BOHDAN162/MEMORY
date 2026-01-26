@@ -2,16 +2,19 @@ import {
   ArrowUpRight,
   CornerDownLeft,
   CornerUpLeft,
+  Grid2X2,
   Hand,
   Image as ImageIcon,
   Link2,
   MousePointer2,
+  RectangleHorizontal,
   Redo2,
   Square,
   StickyNote,
   Trash2,
   Type,
   Undo2,
+  View,
 } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -27,10 +30,13 @@ type BoardToolbarProps = {
   onSave: () => void;
   onBringToFront: () => void;
   onSendToBack: () => void;
+  onFitView: () => void;
+  onToggleSnap: () => void;
   canUndo: boolean;
   canRedo: boolean;
   canDelete: boolean;
   canReorder: boolean;
+  snapToGrid: boolean;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
   saveMessage: string;
 };
@@ -44,10 +50,11 @@ const TOOL_ITEMS: Array<{
   { tool: "select", label: "Select", icon: MousePointer2, shortcut: "V" },
   { tool: "hand", label: "Hand", icon: Hand, shortcut: "H" },
   { tool: "text", label: "Text", icon: Type, shortcut: "T" },
-  { tool: "sticky", label: "Sticky", icon: StickyNote, shortcut: "S" },
+  { tool: "sticky", label: "Sticky", icon: StickyNote, shortcut: "N" },
+  { tool: "card", label: "Card", icon: RectangleHorizontal, shortcut: "C" },
   { tool: "image", label: "Image", icon: ImageIcon, shortcut: "I" },
   { tool: "frame", label: "Frame", icon: Square, shortcut: "F" },
-  { tool: "connect", label: "Connect", icon: Link2, shortcut: "C" },
+  { tool: "connect", label: "Connect", icon: Link2, shortcut: "L" },
 ];
 
 export const BoardToolbar = ({
@@ -59,10 +66,13 @@ export const BoardToolbar = ({
   onSave,
   onBringToFront,
   onSendToBack,
+  onFitView,
+  onToggleSnap,
   canUndo,
   canRedo,
   canDelete,
   canReorder,
+  snapToGrid,
   saveState,
   saveMessage,
 }: BoardToolbarProps) => {
@@ -157,6 +167,23 @@ export const BoardToolbar = ({
           <CornerUpLeft className="h-4 w-4" />
           Сохранить
         </Button>
+        <Button type="button" size="sm" variant="soft" className="h-9 gap-2" onClick={onFitView}>
+          <View className="h-4 w-4" />
+          Fit
+          <span className="rounded-full bg-black/20 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+            0
+          </span>
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={snapToGrid ? "primary" : "soft"}
+          className="h-9 gap-2"
+          onClick={onToggleSnap}
+        >
+          <Grid2X2 className="h-4 w-4" />
+          Snap
+        </Button>
         <span
           className={cn(
             "rounded-full px-3 py-1 text-[11px] font-semibold",
@@ -174,8 +201,9 @@ export const BoardToolbar = ({
         <span>V — Select</span>
         <span>H — Hand</span>
         <span>T — Text</span>
-        <span>S — Sticky</span>
-        <span>C — Connect</span>
+        <span>N — Sticky</span>
+        <span>C — Card</span>
+        <span>L — Connect</span>
         <span>Delete — Remove</span>
       </div>
     </div>

@@ -7,6 +7,7 @@ import type { BoardNodeData, BoardNodeKind, BoardTool } from "@/components/featu
 const DEFAULT_NODE_SIZES: Record<Exclude<BoardNodeKind, "interest">, { width: number; height: number }> = {
   text: { width: 220, height: 120 },
   sticky: { width: 240, height: 180 },
+  card: { width: 260, height: 200 },
   image: { width: 260, height: 180 },
   frame: { width: 320, height: 240 },
 };
@@ -24,6 +25,8 @@ export const createDefaultNodeData = (tool: BoardTool | BoardNodeKind): BoardNod
       return { kind: "text", text: "" };
     case "sticky":
       return { kind: "sticky", title: "Sticky", text: "" };
+    case "card":
+      return { kind: "card", title: "Card", text: "" };
     case "image":
       return { kind: "image", url: "" };
     case "frame":
@@ -36,7 +39,7 @@ export const createDefaultNodeData = (tool: BoardTool | BoardNodeKind): BoardNod
 };
 
 export const isBoardNodeType = (type: string): type is Exclude<BoardNodeKind, "interest"> =>
-  type === "text" || type === "sticky" || type === "image" || type === "frame";
+  type === "text" || type === "sticky" || type === "card" || type === "image" || type === "frame";
 
 const stripNodeData = (data: BoardNodeData): Record<string, unknown> => {
   const { onCommit, onCancel, isEditing, ...rest } = data as BoardNodeData & {

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { BoardEdgeRecord, BoardNodeRecord } from "@/lib/types";
+import type { BoardEdgeRecord, BoardNodeRecord, BoardViewport } from "@/lib/types";
 
 export type BoardStorageError = {
   message: string;
@@ -12,13 +12,15 @@ export type BoardStorageData = {
   boardId: string;
   nodes: BoardNodeRecord[];
   edges: BoardEdgeRecord[];
+  viewport: BoardViewport;
 };
 
 const isMissingTableError = (message: string) =>
   message.includes("Could not find the table") ||
   message.includes("relation \"boards\" does not exist") ||
   message.includes("relation \"board_nodes\" does not exist") ||
-  message.includes("relation \"board_edges\" does not exist");
+  message.includes("relation \"board_edges\" does not exist") ||
+  message.includes("relation \"board_viewport\" does not exist");
 
 const toStorageError = (message: string): BoardStorageError => ({
   message,
@@ -74,7 +76,7 @@ export const loadBoardStorage = async (): Promise<
     return { data: null, error: boardResult.error ?? { message: "Unable to ensure board", missingTables: false } };
   }
 
-  const [nodesResult, edgesResult] = await Promise.all([
+  const [nodesResult, edgesResult, viewportResult] = await Promise.all([
     supabase
       .from("board_nodes")
       .select("id,type,position,data,width,height,z_index")
@@ -83,6 +85,7 @@ export const loadBoardStorage = async (): Promise<
       .from("board_edges")
       .select("id,source,target,data,style")
       .eq("board_id", boardResult.data.id),
+    supabase.from("board_viewport").select("viewport").eq("board_id", boardResult.data.id).maybeSingle(),
   ]);
 
   if (nodesResult.error) {
@@ -91,6 +94,10 @@ export const loadBoardStorage = async (): Promise<
 
   if (edgesResult.error) {
     return { data: null, error: toStorageError(edgesResult.error.message) };
+  }
+
+  if (viewportResult.error) {
+    return { data: null, error: toStorageError(viewportResult.error.message) };
   }
 
   const nodes: BoardNodeRecord[] =
@@ -113,11 +120,14 @@ export const loadBoardStorage = async (): Promise<
       style: (row.style as BoardEdgeRecord["style"]) ?? null,
     })) ?? [];
 
+  const viewportData = viewportResult.data?.viewport as BoardViewport | undefined;
+
   return {
     data: {
       boardId: boardResult.data.id,
       nodes,
       edges,
+      viewport: viewportData ?? { x: 0, y: 0, zoom: 1 },
     },
     error: null,
   };
@@ -127,12 +137,14 @@ export const persistBoardStorage = async ({
   boardId,
   nodes,
   edges,
+  viewport,
   deletedNodeIds,
   deletedEdgeIds,
 }: {
   boardId: string;
   nodes: BoardNodeRecord[];
   edges: BoardEdgeRecord[];
+  viewport: BoardViewport;
   deletedNodeIds: string[];
   deletedEdgeIds: string[];
 }): Promise<{ error: BoardStorageError | null }> => {
@@ -162,13 +174,16 @@ export const persistBoardStorage = async ({
     style: edge.style ?? {},
   }));
 
-  const [nodesResult, edgesResult, deleteNodesResult, deleteEdgesResult] = await Promise.all([
+  const [nodesResult, edgesResult, viewportResult, deleteNodesResult, deleteEdgesResult] = await Promise.all([
     nodePayload.length > 0
       ? supabase.from("board_nodes").upsert(nodePayload, { onConflict: "id" })
       : Promise.resolve({ error: null }),
     edgePayload.length > 0
       ? supabase.from("board_edges").upsert(edgePayload, { onConflict: "id" })
       : Promise.resolve({ error: null }),
+    supabase
+      .from("board_viewport")
+      .upsert({ board_id: boardId, viewport }, { onConflict: "board_id" }),
     deletedNodeIds.length > 0
       ? supabase.from("board_nodes").delete().eq("board_id", boardId).in("id", deletedNodeIds)
       : Promise.resolve({ error: null }),
@@ -180,6 +195,7 @@ export const persistBoardStorage = async ({
   const errorMessage =
     nodesResult.error?.message ||
     edgesResult.error?.message ||
+    viewportResult.error?.message ||
     deleteNodesResult.error?.message ||
     deleteEdgesResult.error?.message ||
     null;
