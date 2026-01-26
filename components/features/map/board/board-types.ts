@@ -1,6 +1,6 @@
 export type EditableNodeCallbacks = {
   isEditing?: boolean;
-  onCommit?: (value: string) => void;
+  onCommit?: (value: string | { title: string; text: string }) => void;
   onCancel?: () => void;
 };
 
@@ -11,6 +11,12 @@ export type TextNodeData = {
 
 export type StickyNodeData = {
   kind: "sticky";
+  title: string;
+  text: string;
+} & EditableNodeCallbacks;
+
+export type CardNodeData = {
+  kind: "card";
   title: string;
   text: string;
 } & EditableNodeCallbacks;
@@ -43,10 +49,11 @@ export type InterestNodeData = {
 export type BoardNodeData =
   | TextNodeData
   | StickyNodeData
+  | CardNodeData
   | ImageNodeData
   | FrameNodeData
   | InterestNodeData;
 
 export type BoardNodeKind = BoardNodeData["kind"];
 
-export type BoardTool = "select" | "hand" | "text" | "sticky" | "image" | "frame" | "connect";
+export type BoardTool = "select" | "hand" | "text" | "sticky" | "card" | "image" | "frame" | "connect";

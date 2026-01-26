@@ -1,4 +1,4 @@
-export type BoardNodeType = "text" | "sticky" | "image" | "frame";
+export type BoardNodeType = "text" | "sticky" | "card" | "image" | "frame";
 
 export type BoardNodeRecord = {
   id: string;

@@ -20,6 +20,7 @@ import {
   persistBoardStorage,
   type BoardStorageError,
 } from "@/components/features/map/board/board-storage";
+import { CardNode } from "@/components/features/map/board/nodes/card-node";
 import { FrameNode } from "@/components/features/map/board/nodes/frame-node";
 import { ImageNode } from "@/components/features/map/board/nodes/image-node";
 import { InterestNode } from "@/components/features/map/board/nodes/interest-node";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils/cn";
 import {
   Background,
   BackgroundVariant,
+  MiniMap,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
@@ -38,18 +40,22 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
   type OnEdgesChange,
   type OnMove,
+  type OnMoveEnd,
   type OnNodesChange,
   type OnNodeDrag,
+  type OnConnect,
   type Viewport,
 } from "@xyflow/react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { buttonVariants } from "@/components/ui/button";
+import type { BoardViewport } from "@/lib/types";
 
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2;
@@ -66,6 +72,7 @@ const nodeTypes = {
   interest: InterestNode,
   text: TextNode,
   sticky: StickyNode,
+  card: CardNode,
   image: ImageNode,
   frame: FrameNode,
 };
@@ -163,6 +170,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardFlowNode>(initialInterestNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [activeTool, setActiveTool] = useState<BoardTool>("select");
+  const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [boardId, setBoardId] = useState<string | null>(null);
@@ -170,9 +178,20 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
   const [isLoadingBoard, setIsLoadingBoard] = useState(true);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "offline">("idle");
   const [saveMessage, setSaveMessage] = useState("Не сохранено");
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    target: "pane" | "selection";
+  } | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const lastSavedNodeIds = useRef<Set<string>>(new Set());
   const lastSavedEdgeIds = useRef<Set<string>>(new Set());
+  const viewportRef = useRef<BoardViewport>({ x: 0, y: 0, zoom: 1 });
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const clipboardRef = useRef<ReturnType<typeof createSnapshot> | null>(null);
+  const altDragSnapshotRef = useRef<{ nodes: BoardFlowNode[]; edges: Edge[] } | null>(null);
+  const previousToolRef = useRef<BoardTool>("select");
   const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
   const historyRef = useRef<{ past: Array<ReturnType<typeof createSnapshot>>; future: Array<ReturnType<typeof createSnapshot>> }>(
     { past: [], future: [] },
@@ -197,6 +216,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
       setStorageError(null);
       const boardNodes = result.data.nodes.map((record) => toFlowNode(record));
       const boardEdges = result.data.edges.map((record) => toFlowEdge(record));
+      viewportRef.current = result.data.viewport;
 
       setNodes((prev) => {
         const existingIds = new Set(prev.map((node) => node.id));
@@ -213,6 +233,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
       lastSavedEdgeIds.current = new Set(boardEdges.map((edge) => edge.id));
       setSaveState("idle");
       setSaveMessage("Сохранено");
+      reactFlow.setViewport(result.data.viewport, { duration: 0 });
       setIsLoadingBoard(false);
     };
 
@@ -293,6 +314,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
           boardId,
           nodes: nodeRecords,
           edges: edgeRecords,
+          viewport: viewportRef.current,
           deletedNodeIds,
           deletedEdgeIds,
         });
@@ -337,19 +359,32 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     return () => window.clearTimeout(timeout);
   }, [saveState]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
+  }, [contextMenu]);
+
   const commitNodeEdit = useCallback(
-    (id: string, value: string) => {
+    (id: string, value: string | { title: string; text: string }) => {
       setNodes((prev) =>
         prev.map((node) => {
           if (node.id !== id) return node;
           if (node.data.kind === "text") {
-            return { ...node, data: { ...node.data, text: value } };
+            return { ...node, data: { ...node.data, text: typeof value === "string" ? value : node.data.text } };
           }
           if (node.data.kind === "sticky") {
-            return { ...node, data: { ...node.data, text: value } };
+            return { ...node, data: { ...node.data, text: typeof value === "string" ? value : node.data.text } };
+          }
+          if (node.data.kind === "card") {
+            if (typeof value === "string") {
+              return node;
+            }
+            return { ...node, data: { ...node.data, title: value.title, text: value.text } };
           }
           if (node.data.kind === "image") {
-            return { ...node, data: { ...node.data, url: value } };
+            return { ...node, data: { ...node.data, url: typeof value === "string" ? value : node.data.url } };
           }
           return node;
         }),
@@ -387,7 +422,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
         data: {
           ...node.data,
           isEditing,
-          onCommit: (value: string) => commitNodeEdit(node.id, value),
+          onCommit: (value: string | { title: string; text: string }) => commitNodeEdit(node.id, value),
           onCancel: cancelNodeEdit,
         },
       };
@@ -417,6 +452,98 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
 
   const renderedEdges = useMemo(() => (previewEdge ? [...edges, previewEdge] : edges), [edges, previewEdge]);
 
+  const getSelectedNodes = useCallback(
+    () => nodes.filter((node) => node.selected && node.type !== "interest"),
+    [nodes],
+  );
+
+  const getSelectedEdges = useCallback(
+    (selectedIds: Set<string>) =>
+      edges.filter((edge) => edge.selected || (selectedIds.has(edge.source) && selectedIds.has(edge.target))),
+    [edges],
+  );
+
+  const cloneSelection = useCallback(
+    (snapshot: ReturnType<typeof createSnapshot>, offset: { x: number; y: number }) => {
+      const nodeIdMap = new Map<string, string>();
+      const clonedNodes = snapshot.nodes.map((node) => {
+        const nextId = crypto.randomUUID();
+        nodeIdMap.set(node.id, nextId);
+        return {
+          ...node,
+          id: nextId,
+          position: {
+            x: node.position.x + offset.x,
+            y: node.position.y + offset.y,
+          },
+          selected: true,
+          dragging: false,
+        };
+      });
+      const clonedEdges = snapshot.edges
+        .filter((edge) => nodeIdMap.has(edge.source) && nodeIdMap.has(edge.target))
+        .map((edge) => ({
+          ...edge,
+          id: crypto.randomUUID(),
+          source: nodeIdMap.get(edge.source) ?? edge.source,
+          target: nodeIdMap.get(edge.target) ?? edge.target,
+          selected: true,
+        }));
+
+      setNodes((prev) => [
+        ...prev.map((node) => ({ ...node, selected: false })),
+        ...clonedNodes,
+      ]);
+      setEdges((prev) => [
+        ...prev.map((edge) => ({ ...edge, selected: false })),
+        ...clonedEdges,
+      ]);
+      scheduleSave();
+      return { clonedNodes, clonedEdges };
+    },
+    [scheduleSave, setEdges, setNodes],
+  );
+
+  const computeSelectionBounds = useCallback((snapshot: ReturnType<typeof createSnapshot>) => {
+    if (snapshot.nodes.length === 0) return null;
+    const bounds = snapshot.nodes.reduce(
+      (acc, node) => {
+        const nodeType = node.type && isBoardNodeType(node.type) ? node.type : "text";
+        const width =
+          typeof node.style?.width === "number" ? node.style.width : defaultNodeSize(nodeType).width;
+        const height =
+          typeof node.style?.height === "number" ? node.style.height : defaultNodeSize(nodeType).height;
+        acc.minX = Math.min(acc.minX, node.position.x);
+        acc.minY = Math.min(acc.minY, node.position.y);
+        acc.maxX = Math.max(acc.maxX, node.position.x + width);
+        acc.maxY = Math.max(acc.maxY, node.position.y + height);
+        return acc;
+      },
+      {
+        minX: Number.POSITIVE_INFINITY,
+        minY: Number.POSITIVE_INFINITY,
+        maxX: Number.NEGATIVE_INFINITY,
+        maxY: Number.NEGATIVE_INFINITY,
+      },
+    );
+    return bounds;
+  }, []);
+
+  const getPasteOffset = useCallback(
+    (snapshot: ReturnType<typeof createSnapshot>) => {
+      const pointer = lastPointerRef.current;
+      if (!pointer) {
+        return { x: 40, y: 40 };
+      }
+      const flowPointer = reactFlow.screenToFlowPosition({ x: pointer.x, y: pointer.y });
+      const bounds = computeSelectionBounds(snapshot);
+      if (!bounds) return { x: 40, y: 40 };
+      const center = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+      return { x: flowPointer.x - center.x, y: flowPointer.y - center.y };
+    },
+    [computeSelectionBounds, reactFlow],
+  );
+
   const handleNodesChange: OnNodesChange<BoardFlowNode> = useCallback(
     (changes) => {
       onNodesChange(changes);
@@ -440,6 +567,23 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     [onEdgesChange, scheduleSave],
   );
 
+  const handleNodeDragStart: OnNodeDrag<BoardFlowNode> = useCallback(
+    (event, node) => {
+      if (!(event instanceof MouseEvent) || !event.altKey) {
+        altDragSnapshotRef.current = null;
+        return;
+      }
+      const selectedNodes = nodes.filter((item) => item.selected && item.type !== "interest");
+      const nodesToSnapshot = selectedNodes.length > 0 ? selectedNodes : [node];
+      const selectedIds = new Set(nodesToSnapshot.map((item) => item.id));
+      const selectedEdges = edges.filter(
+        (edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target),
+      );
+      altDragSnapshotRef.current = createSnapshot(nodesToSnapshot, selectedEdges);
+    },
+    [edges, nodes],
+  );
+
   const handleNodeDragStop: OnNodeDrag<BoardFlowNode> = useCallback(
     (_event, node) => {
       if (node.type === "interest") {
@@ -447,17 +591,130 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
       } else {
         scheduleSave();
       }
+
+      if (altDragSnapshotRef.current) {
+        const snapshot = altDragSnapshotRef.current;
+        altDragSnapshotRef.current = null;
+        historyRef.current.past.push(createSnapshot(nodes, edges));
+        historyRef.current.future = [];
+        const selectedNodes = getSelectedNodes();
+        const selectedIds = new Set(selectedNodes.map((item) => item.id));
+        const selectedEdges = getSelectedEdges(selectedIds);
+        cloneSelection(createSnapshot(selectedNodes, selectedEdges), { x: 0, y: 0 });
+        setNodes((prev) =>
+          prev.map((item) => {
+            const original = snapshot.nodes.find((snap) => snap.id === item.id);
+            if (!original) return item;
+            return { ...item, position: { ...original.position } };
+          }),
+        );
+        scheduleSave();
+        return;
+      }
+
       historyRef.current.past.push(createSnapshot(nodes, edges));
       historyRef.current.future = [];
     },
-    [edges, nodes, scheduleSave],
+    [cloneSelection, edges, getSelectedEdges, getSelectedNodes, nodes, scheduleSave, setNodes],
   );
+
+  const clearSelection = useCallback(() => {
+    setNodes((prev) => prev.map((node) => ({ ...node, selected: false })));
+    setEdges((prev) => prev.map((edge) => ({ ...edge, selected: false })));
+  }, [setEdges, setNodes]);
+
+  const handleSelectAll = useCallback(() => {
+    setNodes((prev) => prev.map((node) => ({ ...node, selected: node.type !== "interest" })));
+    setEdges((prev) => prev.map((edge) => ({ ...edge, selected: true })));
+  }, [setEdges, setNodes]);
+
+  const handleCopy = useCallback(() => {
+    const selectedNodes = getSelectedNodes();
+    if (selectedNodes.length === 0) return;
+    const selectedIds = new Set(selectedNodes.map((node) => node.id));
+    const selectedEdges = getSelectedEdges(selectedIds);
+    clipboardRef.current = createSnapshot(selectedNodes, selectedEdges);
+  }, [getSelectedEdges, getSelectedNodes]);
+
+  const handlePaste = useCallback(() => {
+    if (!clipboardRef.current) return;
+    historyRef.current.past.push(createSnapshot(nodes, edges));
+    historyRef.current.future = [];
+    const offset = getPasteOffset(clipboardRef.current);
+    cloneSelection(clipboardRef.current, offset);
+  }, [cloneSelection, edges, getPasteOffset, nodes]);
+
+  const handleDuplicate = useCallback(() => {
+    const selectedNodes = getSelectedNodes();
+    if (selectedNodes.length === 0) return;
+    const selectedIds = new Set(selectedNodes.map((node) => node.id));
+    const selectedEdges = getSelectedEdges(selectedIds);
+    const snapshot = createSnapshot(selectedNodes, selectedEdges);
+    historyRef.current.past.push(createSnapshot(nodes, edges));
+    historyRef.current.future = [];
+    cloneSelection(snapshot, { x: 32, y: 32 });
+  }, [cloneSelection, edges, getSelectedEdges, getSelectedNodes, nodes]);
+
+  const alignSelection = useCallback(
+    (mode: "left" | "center" | "right" | "top" | "middle" | "bottom") => {
+      const selectedNodes = getSelectedNodes();
+      if (selectedNodes.length < 2) return;
+      const bounds = computeSelectionBounds(createSnapshot(selectedNodes, []));
+      if (!bounds) return;
+      historyRef.current.past.push(createSnapshot(nodes, edges));
+      historyRef.current.future = [];
+      setNodes((prev) =>
+        prev.map((node) => {
+          if (!node.selected || node.type === "interest") return node;
+          const nodeType = node.type && isBoardNodeType(node.type) ? node.type : "text";
+          const width =
+            typeof node.style?.width === "number" ? node.style.width : defaultNodeSize(nodeType).width;
+          const height =
+            typeof node.style?.height === "number" ? node.style.height : defaultNodeSize(nodeType).height;
+          if (mode === "left") {
+            return { ...node, position: { ...node.position, x: bounds.minX } };
+          }
+          if (mode === "center") {
+            const center = (bounds.minX + bounds.maxX) / 2;
+            return { ...node, position: { ...node.position, x: center - width / 2 } };
+          }
+          if (mode === "right") {
+            return { ...node, position: { ...node.position, x: bounds.maxX - width } };
+          }
+          if (mode === "top") {
+            return { ...node, position: { ...node.position, y: bounds.minY } };
+          }
+          if (mode === "middle") {
+            const middle = (bounds.minY + bounds.maxY) / 2;
+            return { ...node, position: { ...node.position, y: middle - height / 2 } };
+          }
+          if (mode === "bottom") {
+            return { ...node, position: { ...node.position, y: bounds.maxY - height } };
+          }
+          return node;
+        }),
+      );
+      scheduleSave();
+    },
+    [computeSelectionBounds, edges, getSelectedNodes, nodes, scheduleSave, setNodes],
+  );
+
+  const handleToolChange = useCallback((tool: BoardTool) => {
+    setActiveTool(tool);
+    if (tool !== "connect") {
+      setConnectFromId(null);
+    }
+  }, []);
 
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
+      setContextMenu(null);
       if (activeTool === "select" || activeTool === "connect" || activeTool === "hand") {
         setEditingNodeId(null);
         setConnectFromId(null);
+        if (activeTool === "select") {
+          clearSelection();
+        }
         return;
       }
 
@@ -477,20 +734,144 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
         position,
         data,
         style: { width: size.width, height: size.height, zIndex },
+        selected: true,
       };
 
       historyRef.current.past.push(createSnapshot(nodes, edges));
       historyRef.current.future = [];
-      setNodes((prev) => [...prev, node]);
+      setNodes((prev) => [...prev.map((item) => ({ ...item, selected: false })), node]);
 
-      if (activeTool === "text" || activeTool === "sticky" || activeTool === "image") {
+      if (activeTool === "text" || activeTool === "sticky" || activeTool === "card" || activeTool === "image") {
         setEditingNodeId(id);
       }
 
       scheduleSave();
     },
-    [activeTool, boardId, edges, nodes, reactFlow, scheduleSave, setNodes, storageError?.missingTables],
+    [
+      activeTool,
+      boardId,
+      clearSelection,
+      edges,
+      nodes,
+      reactFlow,
+      scheduleSave,
+      setNodes,
+      storageError?.missingTables,
+    ],
   );
+
+  const addNodeAt = useCallback(
+    (tool: BoardTool, position: { x: number; y: number }) => {
+      if (!boardId || storageError?.missingTables) return;
+      const id = crypto.randomUUID();
+      const data = createDefaultNodeData(tool);
+      const size = defaultNodeSize(tool);
+      const zIndex = tool === "frame" ? 0 : 2;
+      const node: BoardFlowNode = {
+        id,
+        type: tool,
+        position,
+        data,
+        style: { width: size.width, height: size.height, zIndex },
+        selected: true,
+      };
+      historyRef.current.past.push(createSnapshot(nodes, edges));
+      historyRef.current.future = [];
+      setNodes((prev) => [...prev.map((item) => ({ ...item, selected: false })), node]);
+      if (tool === "text" || tool === "sticky" || tool === "card" || tool === "image") {
+        setEditingNodeId(id);
+      }
+      scheduleSave();
+    },
+    [boardId, edges, nodes, scheduleSave, setNodes, storageError?.missingTables],
+  );
+
+  const handlePaneContextMenu = useCallback(
+    (event: MouseEvent | React.MouseEvent) => {
+      event.preventDefault();
+      clearSelection();
+      setContextMenu({ x: event.clientX, y: event.clientY, target: "pane" });
+      lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    },
+    [clearSelection],
+  );
+
+  const handleNodeContextMenu = useCallback(
+    (event: MouseEvent | React.MouseEvent, node: BoardFlowNode) => {
+      event.preventDefault();
+      if (!node.selected) {
+        setNodes((prev) => prev.map((item) => ({ ...item, selected: item.id === node.id })));
+        setEdges((prev) => prev.map((edge) => ({ ...edge, selected: false })));
+      }
+      setContextMenu({ x: event.clientX, y: event.clientY, target: "selection" });
+      lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    },
+    [setEdges, setNodes],
+  );
+
+  const handleSelectionDelete = useCallback(() => {
+    const selectedNodeIds = nodes
+      .filter((node) => node.selected)
+      .filter((node) => node.type !== "interest")
+      .map((node) => node.id);
+    const selectedEdgeIds = edges.filter((edge) => edge.selected).map((edge) => edge.id);
+
+    if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
+
+    historyRef.current.past.push(createSnapshot(nodes, edges));
+    historyRef.current.future = [];
+
+    if (selectedNodeIds.length > 0) {
+      setNodes((prev) => prev.filter((node) => !selectedNodeIds.includes(node.id)));
+    }
+    if (selectedEdgeIds.length > 0) {
+      setEdges((prev) => prev.filter((edge) => !selectedEdgeIds.includes(edge.id)));
+    }
+    scheduleSave();
+  }, [edges, nodes, scheduleSave, setEdges, setNodes]);
+
+  const handleContextAdd = useCallback(
+    (tool: BoardTool) => {
+      if (!contextMenu) return;
+      const position = reactFlow.screenToFlowPosition({ x: contextMenu.x, y: contextMenu.y });
+      addNodeAt(tool, position);
+      setContextMenu(null);
+    },
+    [addNodeAt, contextMenu, reactFlow],
+  );
+
+  const handleContextPaste = useCallback(() => {
+    handlePaste();
+    setContextMenu(null);
+  }, [handlePaste]);
+
+  const handleContextDuplicate = useCallback(() => {
+    handleDuplicate();
+    setContextMenu(null);
+  }, [handleDuplicate]);
+
+  const handleContextDelete = useCallback(() => {
+    handleSelectionDelete();
+    setContextMenu(null);
+  }, [handleSelectionDelete]);
+
+  const handleContextFitView = useCallback(() => {
+    reactFlow.fitView({ padding: 0.2, duration: 200 });
+    setContextMenu(null);
+  }, [reactFlow]);
+
+  const handleContextAlign = useCallback(
+    (mode: "left" | "center" | "right" | "top" | "middle" | "bottom") => {
+      alignSelection(mode);
+      setContextMenu(null);
+    },
+    [alignSelection],
+  );
+
+  const handleContextCopy = useCallback(() => {
+    handleCopy();
+    setContextMenu(null);
+  }, [handleCopy]);
 
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: BoardFlowNode) => {
@@ -527,37 +908,56 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     [activeTool, connectFromId, edges, nodes, scheduleSave, setEdges],
   );
 
+  const handleConnect: OnConnect = useCallback(
+    (connection: Connection) => {
+      if (activeTool !== "connect") return;
+      if (!connection.source || !connection.target) return;
+      const id = crypto.randomUUID();
+      const newEdge: Edge = {
+        id,
+        source: connection.source,
+        target: connection.target,
+        type: "smoothstep",
+        style: {
+          stroke: "hsl(var(--primary) / 0.8)",
+          strokeWidth: 2,
+        },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--primary) / 0.8)" },
+      };
+      historyRef.current.past.push(createSnapshot(nodes, edges));
+      historyRef.current.future = [];
+      setEdges((prev) => addEdge(newEdge, prev));
+      setConnectFromId(null);
+      scheduleSave();
+    },
+    [activeTool, edges, nodes, scheduleSave, setConnectFromId, setEdges],
+  );
+
   const handleNodeDoubleClick = useCallback(
     (_event: React.MouseEvent, node: BoardFlowNode) => {
-      if (node.data.kind === "text" || node.data.kind === "sticky" || node.data.kind === "image") {
+      if (
+        node.data.kind === "text" ||
+        node.data.kind === "sticky" ||
+        node.data.kind === "card" ||
+        node.data.kind === "image"
+      ) {
         setEditingNodeId(node.id);
       }
     },
     [],
   );
 
-  const handleViewportMove: OnMove = useCallback((_event: MouseEvent | TouchEvent | null, _viewport: Viewport) => {}, []);
+  const handleViewportMove: OnMove = useCallback((_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
+    viewportRef.current = viewport;
+  }, []);
 
-  const handleSelectionDelete = useCallback(() => {
-    const selectedNodeIds = nodes
-      .filter((node) => node.selected)
-      .filter((node) => node.type !== "interest")
-      .map((node) => node.id);
-    const selectedEdgeIds = edges.filter((edge) => edge.selected).map((edge) => edge.id);
-
-    if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
-
-    historyRef.current.past.push(createSnapshot(nodes, edges));
-    historyRef.current.future = [];
-
-    if (selectedNodeIds.length > 0) {
-      setNodes((prev) => prev.filter((node) => !selectedNodeIds.includes(node.id)));
-    }
-    if (selectedEdgeIds.length > 0) {
-      setEdges((prev) => prev.filter((edge) => !selectedEdgeIds.includes(edge.id)));
-    }
-    scheduleSave();
-  }, [edges, nodes, scheduleSave, setEdges, setNodes]);
+  const handleViewportMoveEnd: OnMoveEnd = useCallback(
+    (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
+      viewportRef.current = viewport;
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
 
   const handleUndo = useCallback(() => {
     const { past, future } = historyRef.current;
@@ -608,7 +1008,6 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     );
     scheduleSave();
   }, [nodes, scheduleSave, setNodes]);
-
   const handleKeybinds = useCallback(
     (event: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null;
@@ -633,13 +1032,70 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
       }
 
       const key = event.key.toLowerCase();
-      if (key === "v") setActiveTool("select");
-      if (key === "h") setActiveTool("hand");
-      if (key === "t") setActiveTool("text");
-      if (key === "s") setActiveTool("sticky");
-      if (key === "c") setActiveTool("connect");
+      if ((event.metaKey || event.ctrlKey) && key === "a") {
+        event.preventDefault();
+        handleSelectAll();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && key === "c") {
+        event.preventDefault();
+        handleCopy();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && key === "v") {
+        event.preventDefault();
+        handlePaste();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && key === "d") {
+        event.preventDefault();
+        handleDuplicate();
+        return;
+      }
+      if (key === "escape") {
+        event.preventDefault();
+        clearSelection();
+        setEditingNodeId(null);
+        setConnectFromId(null);
+        setContextMenu(null);
+        return;
+      }
+      if (key === "0") {
+        event.preventDefault();
+        reactFlow.fitView({ padding: 0.2, duration: 200 });
+        return;
+      }
+      if (key === "+" || key === "=") {
+        event.preventDefault();
+        void reactFlow.zoomIn({ duration: 150 });
+        return;
+      }
+      if (key === "-") {
+        event.preventDefault();
+        void reactFlow.zoomOut({ duration: 150 });
+        return;
+      }
+      if (key === "v") handleToolChange("select");
+      if (key === "h") handleToolChange("hand");
+      if (key === "t") handleToolChange("text");
+      if (key === "n" || key === "s") handleToolChange("sticky");
+      if (key === "c") handleToolChange("card");
+      if (key === "f") handleToolChange("frame");
+      if (key === "l") handleToolChange("connect");
+      if (key === "i") handleToolChange("image");
     },
-    [handleRedo, handleSelectionDelete, handleUndo],
+    [
+      clearSelection,
+      handleCopy,
+      handleDuplicate,
+      handlePaste,
+      handleRedo,
+      handleToolChange,
+      handleSelectAll,
+      handleSelectionDelete,
+      handleUndo,
+      reactFlow,
+    ],
   );
 
   useEffect(() => {
@@ -647,12 +1103,35 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
     return () => window.removeEventListener("keydown", handleKeybinds);
   }, [handleKeybinds]);
 
-  const handleToolChange = useCallback((tool: BoardTool) => {
-    setActiveTool(tool);
-    if (tool !== "connect") {
-      setConnectFromId(null);
-    }
-  }, []);
+  useEffect(() => {
+    const handleSpaceDown = (event: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) {
+        return;
+      }
+      if (event.code !== "Space" || event.repeat) return;
+      event.preventDefault();
+      if (!isSpacePanning) {
+        previousToolRef.current = activeTool;
+        setIsSpacePanning(true);
+        setActiveTool("hand");
+      }
+    };
+    const handleSpaceUp = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return;
+      if (isSpacePanning) {
+        event.preventDefault();
+        setIsSpacePanning(false);
+        setActiveTool(previousToolRef.current);
+      }
+    };
+    window.addEventListener("keydown", handleSpaceDown);
+    window.addEventListener("keyup", handleSpaceUp);
+    return () => {
+      window.removeEventListener("keydown", handleSpaceDown);
+      window.removeEventListener("keyup", handleSpaceUp);
+    };
+  }, [activeTool, isSpacePanning]);
 
   const selectionCount = nodes.filter((node) => node.selected && node.type !== "interest").length;
   const selectedEdgeCount = edges.filter((edge) => edge.selected).length;
@@ -681,20 +1160,36 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         onMove={handleViewportMove}
+        onMoveEnd={handleViewportMoveEnd}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
+        onConnect={handleConnect}
+        onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={handlePaneClick}
+        onPaneContextMenu={handlePaneContextMenu}
+        onNodeContextMenu={handleNodeContextMenu}
+        onPaneMouseMove={(event) => {
+          lastPointerRef.current = { x: event.clientX, y: event.clientY };
+        }}
+        onNodeMouseMove={(event) => {
+          lastPointerRef.current = { x: event.clientX, y: event.clientY };
+        }}
         onNodeMouseEnter={(_event, node) => setHoverNodeId(node.id)}
         onNodeMouseLeave={() => setHoverNodeId(null)}
-        panOnDrag={activeTool === "hand"}
+        panOnDrag={activeTool === "hand" ? [1, 4] : [4]}
+        panOnScroll
+        zoomOnScroll
+        zoomActivationKeyCode={["Meta", "Control"]}
         selectionOnDrag={activeTool === "select"}
         multiSelectionKeyCode={["Shift"]}
         deleteKeyCode={null}
         nodesDraggable={activeTool !== "hand"}
         nodesConnectable={activeTool === "connect"}
+        snapToGrid={snapToGrid}
+        snapGrid={[20, 20]}
         proOptions={{ hideAttribution: true }}
         className={cn(
           "bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.03),transparent_35%),radial-gradient(circle_at_20%_80%,rgba(255,255,255,0.03),transparent_35%)]",
@@ -703,6 +1198,14 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
         )}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1.6} color="rgba(255,255,255,0.08)" />
+        <MiniMap
+          pannable
+          zoomable
+          nodeStrokeColor="rgba(148,163,184,0.8)"
+          nodeColor="rgba(30,41,59,0.8)"
+          nodeBorderRadius={6}
+          className="!bg-slate-950/70 !border !border-slate-700/60 !rounded-xl shadow-lg"
+        />
       </ReactFlow>
 
       <div className="absolute inset-x-4 bottom-4 z-20 flex justify-center">
@@ -715,20 +1218,178 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
           onSave={() => scheduleSave(true)}
           onBringToFront={handleBringToFront}
           onSendToBack={handleSendToBack}
+          onFitView={() => reactFlow.fitView({ padding: 0.2, duration: 200 })}
+          onToggleSnap={() => setSnapToGrid((prev) => !prev)}
           canUndo={canUndo}
           canRedo={canRedo}
           canDelete={canDelete}
           canReorder={canReorder}
+          snapToGrid={snapToGrid}
           saveState={saveState}
           saveMessage={saveMessage}
         />
       </div>
 
+      {contextMenu ? (
+        <div
+          className="absolute z-40 min-w-[220px] rounded-xl border border-border/80 bg-background/95 p-2 text-sm shadow-2xl shadow-black/20 backdrop-blur"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {contextMenu.target === "pane" ? (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={() => handleContextAdd("text")}
+              >
+                Add Text
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={() => handleContextAdd("sticky")}
+              >
+                Add Sticky
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={() => handleContextAdd("card")}
+              >
+                Add Card
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={() => handleContextAdd("frame")}
+              >
+                Add Frame
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={() => handleContextAdd("image")}
+              >
+                Add Image
+              </button>
+              <div className="my-1 h-px bg-border/60" />
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleContextPaste}
+              >
+                Paste
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleContextFitView}
+              >
+                Fit view
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleContextDuplicate}
+              >
+                Duplicate
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleContextDelete}
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleContextCopy}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleContextPaste}
+              >
+                Paste
+              </button>
+              <div className="my-1 h-px bg-border/60" />
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleBringToFront}
+              >
+                Bring to front
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                onClick={handleSendToBack}
+              >
+                Send to back
+              </button>
+              <div className="my-1 h-px bg-border/60" />
+              <div className="px-3 py-1 text-xs uppercase text-muted-foreground">Align</div>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs hover:bg-muted/60"
+                  onClick={() => handleContextAlign("left")}
+                >
+                  Left
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs hover:bg-muted/60"
+                  onClick={() => handleContextAlign("center")}
+                >
+                  Center
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs hover:bg-muted/60"
+                  onClick={() => handleContextAlign("right")}
+                >
+                  Right
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs hover:bg-muted/60"
+                  onClick={() => handleContextAlign("top")}
+                >
+                  Top
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs hover:bg-muted/60"
+                  onClick={() => handleContextAlign("middle")}
+                >
+                  Middle
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-xs hover:bg-muted/60"
+                  onClick={() => handleContextAlign("bottom")}
+                >
+                  Bottom
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {storageNotice ? (
         <div className="absolute left-4 top-4 z-30 max-w-md rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <p className="font-semibold">{storageNotice}</p>
           <p className="mt-2 text-xs text-destructive/80">
-            Если вы администратор, примените SQL миграцию Supabase для tables boards/board_nodes/board_edges.
+            Если вы администратор, примените SQL миграцию Supabase для tables boards/board_nodes/board_edges/board_viewport.
           </p>
           <button
             type="button"
@@ -742,6 +1403,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
               setBoardId(result.data.boardId);
               const boardNodes = result.data.nodes.map((record) => toFlowNode(record));
               const boardEdges = result.data.edges.map((record) => toFlowEdge(record));
+              viewportRef.current = result.data.viewport;
               setNodes((prev) => {
                 const existingIds = new Set(prev.map((node) => node.id));
                 const merged = [...prev];
@@ -755,6 +1417,7 @@ const MapCanvasInner = ({ interests }: MapCanvasProps) => {
               setEdges(boardEdges);
               lastSavedNodeIds.current = new Set(boardNodes.map((node) => node.id));
               lastSavedEdgeIds.current = new Set(boardEdges.map((edge) => edge.id));
+              reactFlow.setViewport(result.data.viewport, { duration: 0 });
             })}
           >
             Retry
