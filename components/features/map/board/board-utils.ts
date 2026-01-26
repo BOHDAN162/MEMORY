@@ -61,7 +61,7 @@ export const toFlowNode = (record: BoardNodeRecord): Node<BoardNodeData> => {
   return {
     id: record.id,
     type: record.type,
-    position: record.position,
+    position: { x: record.x, y: record.y },
     data,
     style: {
       width,
@@ -76,6 +76,7 @@ export const toFlowEdge = (record: BoardEdgeRecord): Edge => ({
   source: record.source,
   target: record.target,
   type: "smoothstep",
+  label: record.label ?? undefined,
   data: record.data ?? {},
   style: {
     stroke: "hsl(var(--primary) / 0.8)",
@@ -96,7 +97,8 @@ export const toBoardNodeRecord = (node: Node<BoardNodeData>): BoardNodeRecord =>
   return {
     id: node.id,
     type: node.type as BoardNodeRecord["type"],
-    position: node.position,
+    x: node.position.x,
+    y: node.position.y,
     data: stripNodeData(node.data),
     width,
     height,

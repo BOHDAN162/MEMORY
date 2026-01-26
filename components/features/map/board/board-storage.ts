@@ -1,6 +1,15 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  deleteBoardEdges,
+  deleteBoardNodes,
+  ensureBoardForUser,
+  fetchBoardEdges,
+  fetchBoardNodes,
+  fetchBoardViewport,
+  upsertBoardEdges,
+  upsertBoardNodes,
+  upsertBoardViewport,
+} from "@/lib/supabase/board";
 import type { BoardEdgeRecord, BoardNodeRecord, BoardViewport } from "@/lib/types";
 
 export type BoardStorageError = {
@@ -27,34 +36,6 @@ const toStorageError = (message: string): BoardStorageError => ({
   missingTables: isMissingTableError(message),
 });
 
-const ensureBoard = async (supabase: SupabaseClient, userId: string) => {
-  const { data: existing, error } = await supabase
-    .from("boards")
-    .select("id,user_id,title")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    return { data: null, error: toStorageError(error.message) };
-  }
-
-  if (existing?.id) {
-    return { data: existing as { id: string; user_id: string; title: string }, error: null };
-  }
-
-  const { data: created, error: insertError } = await supabase
-    .from("boards")
-    .insert({ user_id: userId, title: "Моя доска" })
-    .select("id,user_id,title")
-    .single();
-
-  if (insertError) {
-    return { data: null, error: toStorageError(insertError.message) };
-  }
-
-  return { data: created as { id: string; user_id: string; title: string }, error: null };
-};
-
 export const loadBoardStorage = async (): Promise<
   { data: BoardStorageData; error: null } | { data: null; error: BoardStorageError }
 > => {
@@ -70,64 +51,39 @@ export const loadBoardStorage = async (): Promise<
     return { data: null, error: { message: "Not authenticated", missingTables: false } };
   }
 
-  const boardResult = await ensureBoard(supabase, authUser.user.id);
+  const boardResult = await ensureBoardForUser(supabase, authUser.user.id);
 
   if (boardResult.error || !boardResult.data) {
-    return { data: null, error: boardResult.error ?? { message: "Unable to ensure board", missingTables: false } };
+    return {
+      data: null,
+      error: boardResult.error ? toStorageError(boardResult.error) : { message: "Unable to ensure board", missingTables: false },
+    };
   }
 
   const [nodesResult, edgesResult, viewportResult] = await Promise.all([
-    supabase
-      .from("board_nodes")
-      .select("id,type,position,data,width,height,z_index")
-      .eq("board_id", boardResult.data.id),
-    supabase
-      .from("board_edges")
-      .select("id,source,target,data,style")
-      .eq("board_id", boardResult.data.id),
-    supabase.from("board_viewport").select("viewport").eq("board_id", boardResult.data.id).maybeSingle(),
+    fetchBoardNodes(supabase, boardResult.data.id),
+    fetchBoardEdges(supabase, boardResult.data.id),
+    fetchBoardViewport(supabase, boardResult.data.id),
   ]);
 
   if (nodesResult.error) {
-    return { data: null, error: toStorageError(nodesResult.error.message) };
+    return { data: null, error: toStorageError(nodesResult.error) };
   }
 
   if (edgesResult.error) {
-    return { data: null, error: toStorageError(edgesResult.error.message) };
+    return { data: null, error: toStorageError(edgesResult.error) };
   }
 
   if (viewportResult.error) {
-    return { data: null, error: toStorageError(viewportResult.error.message) };
+    return { data: null, error: toStorageError(viewportResult.error) };
   }
-
-  const nodes: BoardNodeRecord[] =
-    nodesResult.data?.map((row) => ({
-      id: row.id as string,
-      type: row.type as BoardNodeRecord["type"],
-      position: row.position as BoardNodeRecord["position"],
-      data: (row.data as BoardNodeRecord["data"]) ?? null,
-      width: typeof row.width === "number" ? row.width : undefined,
-      height: typeof row.height === "number" ? row.height : undefined,
-      zIndex: typeof row.z_index === "number" ? row.z_index : undefined,
-    })) ?? [];
-
-  const edges: BoardEdgeRecord[] =
-    edgesResult.data?.map((row) => ({
-      id: row.id as string,
-      source: row.source as string,
-      target: row.target as string,
-      data: (row.data as BoardEdgeRecord["data"]) ?? null,
-      style: (row.style as BoardEdgeRecord["style"]) ?? null,
-    })) ?? [];
-
-  const viewportData = viewportResult.data?.viewport as BoardViewport | undefined;
 
   return {
     data: {
       boardId: boardResult.data.id,
-      nodes,
-      edges,
-      viewport: viewportData ?? { x: 0, y: 0, zoom: 1 },
+      nodes: nodesResult.data,
+      edges: edgesResult.data,
+      viewport: viewportResult.data ?? { x: 0, y: 0, zoom: 1 },
     },
     error: null,
   };
@@ -154,50 +110,20 @@ export const persistBoardStorage = async ({
     return { error: { message: "Supabase client is not configured.", missingTables: false } };
   }
 
-  const nodePayload = nodes.map((node) => ({
-    id: node.id,
-    board_id: boardId,
-    type: node.type,
-    position: node.position,
-    data: node.data ?? {},
-    width: node.width ?? null,
-    height: node.height ?? null,
-    z_index: node.zIndex ?? 0,
-  }));
-
-  const edgePayload = edges.map((edge) => ({
-    id: edge.id,
-    board_id: boardId,
-    source: edge.source,
-    target: edge.target,
-    data: edge.data ?? {},
-    style: edge.style ?? {},
-  }));
-
   const [nodesResult, edgesResult, viewportResult, deleteNodesResult, deleteEdgesResult] = await Promise.all([
-    nodePayload.length > 0
-      ? supabase.from("board_nodes").upsert(nodePayload, { onConflict: "id" })
-      : Promise.resolve({ error: null }),
-    edgePayload.length > 0
-      ? supabase.from("board_edges").upsert(edgePayload, { onConflict: "id" })
-      : Promise.resolve({ error: null }),
-    supabase
-      .from("board_viewport")
-      .upsert({ board_id: boardId, viewport }, { onConflict: "board_id" }),
-    deletedNodeIds.length > 0
-      ? supabase.from("board_nodes").delete().eq("board_id", boardId).in("id", deletedNodeIds)
-      : Promise.resolve({ error: null }),
-    deletedEdgeIds.length > 0
-      ? supabase.from("board_edges").delete().eq("board_id", boardId).in("id", deletedEdgeIds)
-      : Promise.resolve({ error: null }),
+    upsertBoardNodes(supabase, boardId, nodes),
+    upsertBoardEdges(supabase, boardId, edges),
+    upsertBoardViewport(supabase, boardId, viewport),
+    deleteBoardNodes(supabase, boardId, deletedNodeIds),
+    deleteBoardEdges(supabase, boardId, deletedEdgeIds),
   ]);
 
   const errorMessage =
-    nodesResult.error?.message ||
-    edgesResult.error?.message ||
-    viewportResult.error?.message ||
-    deleteNodesResult.error?.message ||
-    deleteEdgesResult.error?.message ||
+    nodesResult.error ||
+    edgesResult.error ||
+    viewportResult.error ||
+    deleteNodesResult.error ||
+    deleteEdgesResult.error ||
     null;
 
   if (errorMessage) {
